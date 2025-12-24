@@ -123,7 +123,8 @@ impl Dispatcher {
         let thread_name = format!("📦 {} Activity", project_name);
 
         // Create the initial thread
-        self.discord
+        let tid = self
+            .discord
             .create_forum_thread(
                 forum_id,
                 &thread_name,
@@ -131,10 +132,11 @@ impl Dispatcher {
             )
             .await?;
 
-        // For now, we need to get the thread ID from the forum
-        // This is a limitation - we'll store it after first message
-        // TODO: Get thread ID from API response and store it
-        Ok(project.forum_channel_id.clone()) // Fallback for now
+        // Save the thread ID to the database
+        let tid_str = tid.get().to_string();
+        projects::update_thread_id(&self.pool, repo, &tid_str).await?;
+
+        Ok(tid_str)
     }
 
     async fn post_event_to_thread(

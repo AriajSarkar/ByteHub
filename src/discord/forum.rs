@@ -18,14 +18,18 @@ impl DiscordClient {
         channel_id: Id<ChannelMarker>,
         name: &str,
         content: &str,
-    ) -> Result<()> {
-        self.http
+    ) -> Result<Id<ChannelMarker>> {
+        let thread = self
+            .http
             .create_forum_thread(channel_id, name)
             .message()
             .content(content)
             .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
             .map_err(|e| Error::Discord(e.to_string()))?;
-        Ok(())
+        Ok(thread.channel.id)
     }
 
     /// Create a forum thread with a styled embed (colored bar)
@@ -37,7 +41,7 @@ impl DiscordClient {
         description: &str,
         color: u32,
         footer: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<Id<ChannelMarker>> {
         let embed = Embed {
             author: None,
             color: Some(color),
@@ -58,13 +62,17 @@ impl DiscordClient {
             video: None,
         };
 
-        self.http
+        let thread = self
+            .http
             .create_forum_thread(channel_id, thread_name)
             .message()
             .embeds(&[embed])
             .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
             .map_err(|e| Error::Discord(e.to_string()))?;
-        Ok(())
+        Ok(thread.channel.id)
     }
 
     pub async fn send_message(&self, channel_id: Id<ChannelMarker>, content: &str) -> Result<()> {

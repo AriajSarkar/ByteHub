@@ -362,8 +362,37 @@ async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<
         None => state.discord.create_github_category(gid).await?,
     };
 
-    // Create Mod category with channels
-    let (mod_cat_id, review_id, approvals_id) = state.discord.create_mod_category(gid).await?;
+    // Find or create Mod category with channels
+    let (mod_cat_id, review_id, approvals_id) =
+        match state.discord.find_channel_by_name(gid, "Mod").await? {
+            Some(cat_id) => {
+                // Category exists, find or create sub-channels
+                let review = match state
+                    .discord
+                    .find_channel_by_name(gid, "project-review")
+                    .await?
+                {
+                    Some(id) => id,
+                    None => {
+                        state
+                            .discord
+                            .create_channel_in_category(gid, cat_id, "project-review")
+                            .await?
+                    }
+                };
+                let approvals = match state.discord.find_channel_by_name(gid, "approvals").await? {
+                    Some(id) => id,
+                    None => {
+                        state
+                            .discord
+                            .create_channel_in_category(gid, cat_id, "approvals")
+                            .await?
+                    }
+                };
+                (cat_id, review, approvals)
+            }
+            None => state.discord.create_mod_category(gid).await?,
+        };
 
     // Save config to database
     server_config::save_config(

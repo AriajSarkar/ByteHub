@@ -145,4 +145,25 @@ impl DiscordClient {
         }
         Ok(None)
     }
+
+    /// Create a text channel in an existing category
+    pub async fn create_channel_in_category(
+        &self,
+        guild_id: Id<GuildMarker>,
+        category_id: Id<ChannelMarker>,
+        name: &str,
+    ) -> Result<Id<ChannelMarker>> {
+        let channel = self
+            .http
+            .create_guild_channel(guild_id, name)
+            .kind(ChannelType::GuildText)
+            .parent_id(category_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        Ok(channel.id)
+    }
 }

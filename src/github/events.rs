@@ -89,6 +89,7 @@ pub struct WorkflowRun {
     pub name: Option<String>,
     pub conclusion: Option<String>,
     pub html_url: String,
+    pub head_branch: Option<String>,
 }
 
 #[derive(Debug, Clone)]

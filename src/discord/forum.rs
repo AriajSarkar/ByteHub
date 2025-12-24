@@ -1,7 +1,16 @@
+use twilight_model::channel::message::embed::{Embed, EmbedFooter};
 use twilight_model::id::{marker::ChannelMarker, Id};
 
 use crate::discord::client::DiscordClient;
 use crate::error::{Error, Result};
+
+/// Colors for CI status
+pub const COLOR_SUCCESS: u32 = 0x2ECC71; // Green
+pub const COLOR_FAILURE: u32 = 0xE74C3C; // Red
+pub const COLOR_SKIPPED: u32 = 0x95A5A6; // Grey
+pub const COLOR_PR: u32 = 0x9B59B6; // Purple - PR merged
+pub const COLOR_BOUNTY: u32 = 0xF1C40F; // Gold - Bounty events
+pub const COLOR_ISSUE: u32 = 0x3498DB; // Blue - Other issues
 
 impl DiscordClient {
     pub async fn create_forum_thread(
@@ -19,10 +28,86 @@ impl DiscordClient {
         Ok(())
     }
 
+    /// Create a forum thread with a styled embed (colored bar)
+    pub async fn create_forum_thread_with_embed(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        thread_name: &str,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<()> {
+        let embed = Embed {
+            author: None,
+            color: Some(color),
+            description: Some(description.to_string()),
+            fields: vec![],
+            footer: footer.map(|f| EmbedFooter {
+                icon_url: None,
+                proxy_icon_url: None,
+                text: f.to_string(),
+            }),
+            image: None,
+            kind: "rich".to_string(),
+            provider: None,
+            thumbnail: None,
+            timestamp: None,
+            title: Some(title.to_string()),
+            url: None,
+            video: None,
+        };
+
+        self.http
+            .create_forum_thread(channel_id, thread_name)
+            .message()
+            .embeds(&[embed])
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(())
+    }
+
     pub async fn send_message(&self, channel_id: Id<ChannelMarker>, content: &str) -> Result<()> {
         self.http
             .create_message(channel_id)
             .content(content)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Send a styled embed message to an existing thread
+    pub async fn send_message_with_embed(
+        &self,
+        thread_id: Id<ChannelMarker>,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<()> {
+        let embed = Embed {
+            author: None,
+            color: Some(color),
+            description: Some(description.to_string()),
+            fields: vec![],
+            footer: footer.map(|f| EmbedFooter {
+                icon_url: None,
+                proxy_icon_url: None,
+                text: f.to_string(),
+            }),
+            image: None,
+            kind: "rich".to_string(),
+            provider: None,
+            thumbnail: None,
+            timestamp: None,
+            title: Some(title.to_string()),
+            url: None,
+            video: None,
+        };
+
+        self.http
+            .create_message(thread_id)
+            .embeds(&[embed])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
         Ok(())

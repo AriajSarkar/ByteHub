@@ -102,6 +102,7 @@ pub async fn handle_interaction(
             "approve" => handle_approve(&state.pool, member, data).await?,
             "deny" => handle_deny(&state.pool, member, data).await?,
             "whitelist-user" => handle_whitelist(&state.pool, member, data).await?,
+            "list" => handle_list(&state.pool, member).await?,
             _ => "Unknown command".to_string(),
         };
 
@@ -213,4 +214,43 @@ async fn check_moderator(pool: &PgPool, member: Option<&Member>) -> Result<()> {
         return Err(Error::Unauthorized);
     }
     Ok(())
+}
+
+async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
+    check_moderator(pool, member).await?;
+
+    let projects_list = projects::list_projects(pool).await?;
+
+    if projects_list.is_empty() {
+        return Ok("No projects registered.".to_string());
+    }
+
+    let mut approved = Vec::new();
+    let mut pending = Vec::new();
+
+    for p in projects_list {
+        let line = format!("• `{}`", p.github_repo);
+        if p.is_approved {
+            approved.push(line);
+        } else {
+            pending.push(line);
+        }
+    }
+
+    let mut response = String::new();
+
+    if !approved.is_empty() {
+        response.push_str("**✅ Approved:**\n");
+        response.push_str(&approved.join("\n"));
+    }
+
+    if !pending.is_empty() {
+        if !response.is_empty() {
+            response.push_str("\n\n");
+        }
+        response.push_str("**⏳ Pending:**\n");
+        response.push_str(&pending.join("\n"));
+    }
+
+    Ok(response)
 }

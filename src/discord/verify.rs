@@ -16,5 +16,6 @@ pub fn verify_discord_signature(
     let mut message = timestamp.as_bytes().to_vec();
     message.extend_from_slice(body);
 
-    public_key.verify(&message, &signature).is_ok()
+    // verify() returns Ok(true) for valid, Ok(false) for invalid
+    matches!(public_key.verify(&message, &signature), Ok(true))
 }

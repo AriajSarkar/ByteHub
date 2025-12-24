@@ -257,22 +257,24 @@ impl Dispatcher {
                 } else {
                     COLOR_FAILURE
                 };
-                let emoji = if conclusion == "success" {
-                    "✅"
+                let thread_name = if conclusion == "success" {
+                    "✅ CI Passed"
                 } else {
-                    "❌"
+                    "❌ CI Failed"
                 };
                 let name = e.workflow_run.name.as_deref().unwrap_or("CI");
                 let branch = e.workflow_run.head_branch.as_deref().unwrap_or("unknown");
 
-                let thread_name = format!("{} CI: {} {} on {}", emoji, name, conclusion, branch);
                 let title = format!("{} Run Details", name);
-                let description = format!("[View Run]({})", e.workflow_run.html_url);
+                let description = format!(
+                    "**{}** - {}\nBranch: `{}`\n[View Run]({})",
+                    name, conclusion, branch, e.workflow_run.html_url
+                );
 
                 self.discord
                     .create_forum_thread_with_embed(
                         forum_id,
-                        &thread_name,
+                        thread_name,
                         &title,
                         &description,
                         color,
@@ -283,13 +285,12 @@ impl Dispatcher {
             ParsedEvent::PullRequest(e) => {
                 let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
                 let color = if has_bounty { COLOR_BOUNTY } else { COLOR_PR };
-                let emoji = if has_bounty { "🪙" } else { "🧩" };
-                let bounty_tag = if has_bounty { " (Bounty)" } else { "" };
+                let thread_name = if has_bounty {
+                    "🪙 PR with bounty"
+                } else {
+                    "🧩 PR Merged"
+                };
 
-                let thread_name = format!(
-                    "{} PR #{} merged{}: {}",
-                    emoji, e.pull_request.number, bounty_tag, e.pull_request.title
-                );
                 let title = e.pull_request.title.clone();
                 let description = format!(
                     "Merged by @{}\n[View PR]({})",
@@ -299,7 +300,7 @@ impl Dispatcher {
                 self.discord
                     .create_forum_thread_with_embed(
                         forum_id,
-                        &thread_name,
+                        thread_name,
                         &title,
                         &description,
                         color,
@@ -314,13 +315,12 @@ impl Dispatcher {
                 } else {
                     COLOR_ISSUE
                 };
-                let emoji = if has_bounty { "🪙" } else { "📋" };
-                let bounty_tag = if has_bounty { " (Bounty)" } else { "" };
+                let thread_name = if has_bounty {
+                    "🪙 Issue with bounty"
+                } else {
+                    "📋 Other issues"
+                };
 
-                let thread_name = format!(
-                    "{} Issue #{} opened{}: {}",
-                    emoji, e.issue.number, bounty_tag, e.issue.title
-                );
                 let title = e.issue.title.clone();
                 let description = format!(
                     "Opened by @{}\n[View Issue]({})",
@@ -330,7 +330,7 @@ impl Dispatcher {
                 self.discord
                     .create_forum_thread_with_embed(
                         forum_id,
-                        &thread_name,
+                        thread_name,
                         &title,
                         &description,
                         color,
@@ -339,7 +339,7 @@ impl Dispatcher {
                     .await?;
             }
             ParsedEvent::Release(e) => {
-                let thread_name = format!("🚀 Release {}", e.release.tag_name);
+                let thread_name = "🚀 Release Published";
                 let title = format!("Release {}", e.release.tag_name);
                 let description = format!(
                     "{}\n\n[View Release]({})",
@@ -350,7 +350,7 @@ impl Dispatcher {
                 self.discord
                     .create_forum_thread_with_embed(
                         forum_id,
-                        &thread_name,
+                        thread_name,
                         &title,
                         &description,
                         COLOR_SUCCESS,

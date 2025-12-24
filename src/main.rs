@@ -40,6 +40,19 @@ async fn root() -> &'static str {
     "⚡ ByteHub - GitHub → Governance → Discord"
 }
 
+use axum::extract::State;
+
+async fn debug_env(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "discord_public_key_len": state.config.discord_public_key.len(),
+        "discord_public_key_prefix": &state.config.discord_public_key[..8.min(state.config.discord_public_key.len())],
+        "discord_application_id": state.config.discord_application_id,
+        "discord_bot_token_len": state.config.discord_bot_token.len(),
+        "database_url_set": !state.config.database_url.is_empty(),
+        "github_webhook_secret_set": !state.config.github_webhook_secret.is_empty(),
+    }))
+}
+
 fn print_banner(addr: &SocketAddr) {
     let display_host = if addr.ip().is_unspecified() {
         "localhost"
@@ -90,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
+        .route("/debug", get(debug_env))
         .route("/webhooks/github", post(handle_webhook))
         .route("/webhooks/discord", post(handle_interaction))
         .with_state(state);

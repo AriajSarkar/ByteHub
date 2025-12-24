@@ -155,9 +155,9 @@ async fn handle_approve(
         .ok_or(Error::InvalidPayload("missing options".into()))?;
     let repo = opts
         .iter()
-        .find(|o| o.name == "project")
+        .find(|o| o.name == "repo")
         .and_then(|o| o.value.as_str())
-        .ok_or(Error::InvalidPayload("missing project".into()))?;
+        .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
     projects::approve_project(pool, repo).await?;
     Ok(format!("Project `{}` approved.", repo))
@@ -175,9 +175,9 @@ async fn handle_deny(
         .ok_or(Error::InvalidPayload("missing options".into()))?;
     let repo = opts
         .iter()
-        .find(|o| o.name == "project")
+        .find(|o| o.name == "repo")
         .and_then(|o| o.value.as_str())
-        .ok_or(Error::InvalidPayload("missing project".into()))?;
+        .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
     projects::deny_project(pool, repo).await?;
     Ok(format!("Project `{}` denied and removed.", repo))

@@ -5,7 +5,7 @@ use tracing::warn;
 
 use crate::discord::verify::verify_discord_signature;
 use crate::error::{Error, Result};
-use crate::governance::{projects, whitelist};
+use crate::governance::{projects, server_config, whitelist};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -14,7 +14,10 @@ pub struct Interaction {
     pub kind: u8,
     pub data: Option<InteractionData>,
     pub member: Option<Member>,
+    pub guild_id: Option<String>,
+    #[allow(dead_code)]
     pub token: String,
+    #[allow(dead_code)]
     pub id: String,
 }
 
@@ -100,6 +103,7 @@ pub async fn handle_interaction(
         let member = interaction.member.as_ref();
 
         let response = match data.name.as_str() {
+            "setup-server" => handle_setup_server(&state, member, &interaction.guild_id).await?,
             "submit-project" => handle_submit_project(&state.pool, data).await?,
             "approve" => handle_approve(&state.pool, member, data).await?,
             "deny" => handle_deny(&state.pool, member, data).await?,
@@ -261,4 +265,68 @@ async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
     }
 
     Ok(response)
+}
+
+use twilight_model::id::Id;
+
+async fn handle_setup_server(
+    state: &AppState,
+    member: Option<&Member>,
+    guild_id: &Option<String>,
+) -> Result<String> {
+    check_moderator(member)?;
+
+    let guild_id_str = guild_id
+        .as_ref()
+        .ok_or(Error::InvalidPayload("missing guild_id".into()))?;
+
+    let guild_id_u64: u64 = guild_id_str
+        .parse()
+        .map_err(|_| Error::InvalidPayload("invalid guild_id".into()))?;
+
+    let gid = Id::new(guild_id_u64);
+
+    // Check if already configured
+    if let Some(config) = server_config::get_config(&state.pool, guild_id_str).await? {
+        return Ok(format!(
+            "✅ Server already configured!\n\n**Channels:**\n• Announcements: <#{}>\n• GitHub Forum: <#{}>",
+            config.announcements_id, config.github_forum_id
+        ));
+    }
+
+    // Find or create announcements channel
+    let announcements_id = match state
+        .discord
+        .find_channel_by_name(gid, "announcements")
+        .await?
+    {
+        Some(id) => id,
+        None => state.discord.create_announcements_channel(gid).await?,
+    };
+
+    // Find or create GitHub forum channel
+    let github_forum_id = match state.discord.find_channel_by_name(gid, "GitHub").await? {
+        Some(id) => id,
+        None => state.discord.create_github_forum(gid).await?,
+    };
+
+    // Create Mod category with channels
+    let (mod_cat_id, review_id, approvals_id) = state.discord.create_mod_category(gid).await?;
+
+    // Save config to database
+    server_config::save_config(
+        &state.pool,
+        guild_id_str,
+        &announcements_id.get().to_string(),
+        &github_forum_id.get().to_string(),
+        Some(&mod_cat_id.get().to_string()),
+        Some(&review_id.get().to_string()),
+        Some(&approvals_id.get().to_string()),
+    )
+    .await?;
+
+    Ok(format!(
+        "✅ **Server setup complete!**\n\n**Created channels:**\n• <#{}> - Announcements\n• <#{}> - GitHub Forum\n• <#{}> - Mod (project-review)\n• <#{}> - Mod (approvals)",
+        announcements_id, github_forum_id, review_id, approvals_id
+    ))
 }

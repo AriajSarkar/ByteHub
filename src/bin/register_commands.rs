@@ -65,6 +65,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             "name": "list",
             "description": "List all registered projects (mod only)"
+        },
+        {
+            "name": "setup-server",
+            "description": "Set up ByteHub channels in this server (mod only)"
         }
     ]);
 

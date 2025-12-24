@@ -105,7 +105,7 @@ pub async fn handle_interaction(
         let response = match data.name.as_str() {
             "setup-server" => handle_setup_server(&state, member, &interaction.guild_id).await?,
             "submit-project" => handle_submit_project(&state.pool, data).await?,
-            "approve" => handle_approve(&state.pool, member, data).await?,
+            "approve" => handle_approve(&state, member, data, &interaction.guild_id).await?,
             "deny" => handle_deny(&state.pool, member, data).await?,
             "whitelist-user" => handle_whitelist(&state.pool, member, data).await?,
             "list" => handle_list(&state.pool, member).await?,
@@ -148,11 +148,13 @@ async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<
 }
 
 async fn handle_approve(
-    pool: &PgPool,
+    state: &AppState,
     member: Option<&Member>,
     data: &InteractionData,
+    guild_id: &Option<String>,
 ) -> Result<String> {
     check_moderator(member)?;
+
     let opts = data
         .options
         .as_ref()
@@ -163,8 +165,43 @@ async fn handle_approve(
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
-    projects::approve_project(pool, repo).await?;
-    Ok(format!("Project `{}` approved.", repo))
+    let guild_id_str = guild_id
+        .as_ref()
+        .ok_or(Error::InvalidPayload("missing guild_id".into()))?;
+
+    // Get server config to find the GitHub forum channel
+    let config = server_config::get_config(&state.pool, guild_id_str)
+        .await?
+        .ok_or(Error::InvalidPayload(
+            "Server not set up. Run /setup-server first.".into(),
+        ))?;
+
+    // Parse forum channel ID
+    let forum_id: u64 = config
+        .github_forum_id
+        .parse()
+        .map_err(|_| Error::InvalidPayload("invalid forum channel id".into()))?;
+    let forum_channel = twilight_model::id::Id::new(forum_id);
+
+    // Create a forum thread for this project
+    let thread_title = format!("📦 {}", repo);
+    let thread_content = format!(
+        "**GitHub Repository:** [`{}`](https://github.com/{})\n\n_GitHub events for this project will be posted here._",
+        repo, repo
+    );
+
+    state
+        .discord
+        .create_forum_thread(forum_channel, &thread_title, &thread_content)
+        .await?;
+
+    // Approve the project in database
+    projects::approve_project(&state.pool, repo).await?;
+
+    Ok(format!(
+        "✅ Project `{}` approved! Thread created in <#{}>.",
+        repo, forum_id
+    ))
 }
 
 async fn handle_deny(

@@ -17,12 +17,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "description": "GitHub repo (e.g. owner/repo-name)",
                     "type": 3,
                     "required": true
-                },
-                {
-                    "name": "channel",
-                    "description": "Forum channel ID for updates",
-                    "type": 3,
-                    "required": true
                 }
             ]
         },

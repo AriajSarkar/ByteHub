@@ -137,13 +137,8 @@ async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<
         .find(|o| o.name == "repo")
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
-    let channel = opts
-        .iter()
-        .find(|o| o.name == "channel")
-        .and_then(|o| o.value.as_str())
-        .ok_or(Error::InvalidPayload("missing channel".into()))?;
 
-    projects::submit_project(pool, repo, channel).await?;
+    projects::submit_project(pool, repo).await?;
     Ok(format!("Project `{}` submitted for approval.", repo))
 }
 
@@ -326,15 +321,7 @@ async fn handle_setup_server(
 
     let gid = Id::new(guild_id_u64);
 
-    // Check if already configured
-    if let Some(config) = server_config::get_config(&state.pool, guild_id_str).await? {
-        return Ok(format!(
-            "✅ Server already configured!\n\n**Channels:**\n• Announcements: <#{}>\n• GitHub Forum: <#{}>",
-            config.announcements_id, config.github_forum_id
-        ));
-    }
-
-    // Find or create announcements channel
+    // Always find or create channels (handles deleted/stale channels)
     let announcements_id = match state
         .discord
         .find_channel_by_name(gid, "announcements")

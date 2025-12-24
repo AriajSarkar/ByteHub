@@ -12,23 +12,18 @@ pub struct Project {
     pub is_approved: bool,
 }
 
-pub async fn submit_project(
-    pool: &PgPool,
-    github_repo: &str,
-    forum_channel_id: &str,
-) -> Result<Uuid> {
+pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
     let name = github_repo.split('/').last().unwrap_or(github_repo);
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO projects (name, github_repo, forum_channel_id)
-        VALUES ($1, $2, $3)
+        VALUES ($1, $2, '')
         ON CONFLICT (github_repo) DO NOTHING
         RETURNING id
         "#,
     )
     .bind(name)
     .bind(github_repo)
-    .bind(forum_channel_id)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| Error::InvalidPayload("project already exists".into()))?;

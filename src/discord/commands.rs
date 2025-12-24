@@ -33,7 +33,9 @@ pub struct CommandOption {
 #[derive(Debug, Deserialize)]
 pub struct Member {
     pub user: User,
+    #[allow(dead_code)]
     pub roles: Vec<String>,
+    pub permissions: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,7 +148,7 @@ async fn handle_approve(
     member: Option<&Member>,
     data: &InteractionData,
 ) -> Result<String> {
-    check_moderator(pool, member).await?;
+    check_moderator(member)?;
     let opts = data
         .options
         .as_ref()
@@ -166,7 +168,7 @@ async fn handle_deny(
     member: Option<&Member>,
     data: &InteractionData,
 ) -> Result<String> {
-    check_moderator(pool, member).await?;
+    check_moderator(member)?;
     let opts = data
         .options
         .as_ref()
@@ -186,7 +188,7 @@ async fn handle_whitelist(
     member: Option<&Member>,
     data: &InteractionData,
 ) -> Result<String> {
-    check_moderator(pool, member).await?;
+    check_moderator(member)?;
     let opts = data
         .options
         .as_ref()
@@ -201,23 +203,29 @@ async fn handle_whitelist(
     Ok(format!("User `{}` added to whitelist.", username))
 }
 
-async fn check_moderator(pool: &PgPool, member: Option<&Member>) -> Result<()> {
+// Check if member has ADMINISTRATOR (0x8) or MANAGE_GUILD (0x20) permission
+fn check_moderator(member: Option<&Member>) -> Result<()> {
     let member = member.ok_or(Error::Unauthorized)?;
-    let is_mod = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM moderators WHERE discord_id = $1)",
-    )
-    .bind(&member.user.id)
-    .fetch_one(pool)
-    .await?;
 
-    if !is_mod {
-        return Err(Error::Unauthorized);
+    // Parse Discord permission bitfield
+    let permissions: u64 = member
+        .permissions
+        .as_ref()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(0);
+
+    const ADMINISTRATOR: u64 = 0x8;
+    const MANAGE_GUILD: u64 = 0x20;
+
+    if permissions & ADMINISTRATOR != 0 || permissions & MANAGE_GUILD != 0 {
+        return Ok(());
     }
-    Ok(())
+
+    Err(Error::Unauthorized)
 }
 
 async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
-    check_moderator(pool, member).await?;
+    check_moderator(member)?;
 
     let projects_list = projects::list_projects(pool).await?;
 

@@ -5,9 +5,7 @@ use twilight_model::id::Id;
 use crate::discord::client::DiscordClient;
 use crate::discord::forum::{COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS};
 use crate::error::Result;
-use crate::github::events::{
-    IssueEvent, ParsedEvent, PullRequestEvent, ReleaseEvent, WorkflowRunEvent,
-};
+use crate::github::events::ParsedEvent;
 use crate::governance::projects;
 
 pub struct Dispatcher {
@@ -40,15 +38,18 @@ impl Dispatcher {
             return Ok(());
         }
 
-        // Get or create the project's activity thread
-        let thread_id = self.get_or_create_thread(&project, repo).await?;
-        let thread_channel = Id::new(thread_id.parse::<u64>().unwrap_or(0));
+        // 1. Log to the persistent "Project Activity" thread
+        let activity_tid_str = self.get_or_create_thread(&project, repo).await?;
+        let activity_tid = Id::new(activity_tid_str.parse::<u64>().unwrap_or(0));
+        self.post_event_to_thread(activity_tid, &event).await?;
+        info!(repo, "logged event to project activity thread");
 
-        // Post event to thread with colored embed
-        self.post_event_to_thread(thread_channel, &event).await?;
-        info!(repo, "posted event to project thread");
+        // 2. Create a NEW dedicated thread for this specific event
+        let forum_id = Id::new(project.forum_channel_id.parse::<u64>().unwrap_or(0));
+        self.create_dedicated_thread(forum_id, &event).await?;
+        info!(repo, "created dedicated thread for event");
 
-        // Check if should also post to announcements
+        // 3. Check if should also post to announcements
         if self.should_announce(&event) {
             self.post_to_announcements(&event, repo).await?;
         }
@@ -60,6 +61,10 @@ impl Dispatcher {
     fn should_post(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
+                // ONLY post when completed (avoids 'unknown' status)
+                if e.action != "completed" {
+                    return false;
+                }
                 // Skip cancelled/skipped CI
                 let conclusion = e.workflow_run.conclusion.as_deref().unwrap_or("unknown");
                 if conclusion == "skipped" || conclusion == "cancelled" {
@@ -77,8 +82,14 @@ impl Dispatcher {
                 // Only merged PRs
                 e.action == "closed" && e.pull_request.merged.unwrap_or(false)
             }
-            ParsedEvent::Issue(_) => true,
-            ParsedEvent::Release(_) => true,
+            ParsedEvent::Issue(e) => {
+                // Only handle new issues
+                e.action == "opened"
+            }
+            ParsedEvent::Release(e) => {
+                // Only handle published releases
+                e.action == "published"
+            }
             ParsedEvent::Unknown => false,
         }
     }
@@ -223,6 +234,125 @@ impl Dispatcher {
                             e.release.body.as_deref().unwrap_or(""),
                             e.release.html_url
                         ),
+                        COLOR_SUCCESS,
+                        Some(&format!("by @{}", e.sender.login)),
+                    )
+                    .await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    async fn create_dedicated_thread(
+        &self,
+        forum_id: Id<twilight_model::id::marker::ChannelMarker>,
+        event: &ParsedEvent,
+    ) -> Result<()> {
+        match event {
+            ParsedEvent::WorkflowRun(e) => {
+                let conclusion = e.workflow_run.conclusion.as_deref().unwrap_or("unknown");
+                let color = if conclusion == "success" {
+                    COLOR_SUCCESS
+                } else {
+                    COLOR_FAILURE
+                };
+                let emoji = if conclusion == "success" {
+                    "✅"
+                } else {
+                    "❌"
+                };
+                let name = e.workflow_run.name.as_deref().unwrap_or("CI");
+                let branch = e.workflow_run.head_branch.as_deref().unwrap_or("unknown");
+
+                let thread_name = format!("{} CI: {} {} on {}", emoji, name, conclusion, branch);
+                let title = format!("{} Run Details", name);
+                let description = format!("[View Run]({})", e.workflow_run.html_url);
+
+                self.discord
+                    .create_forum_thread_with_embed(
+                        forum_id,
+                        &thread_name,
+                        &title,
+                        &description,
+                        color,
+                        Some(&format!("Branch: {}", branch)),
+                    )
+                    .await?;
+            }
+            ParsedEvent::PullRequest(e) => {
+                let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
+                let color = if has_bounty { COLOR_BOUNTY } else { COLOR_PR };
+                let emoji = if has_bounty { "🪙" } else { "🧩" };
+                let bounty_tag = if has_bounty { " (Bounty)" } else { "" };
+
+                let thread_name = format!(
+                    "{} PR #{} merged{}: {}",
+                    emoji, e.pull_request.number, bounty_tag, e.pull_request.title
+                );
+                let title = e.pull_request.title.clone();
+                let description = format!(
+                    "Merged by @{}\n[View PR]({})",
+                    e.sender.login, e.pull_request.html_url
+                );
+
+                self.discord
+                    .create_forum_thread_with_embed(
+                        forum_id,
+                        &thread_name,
+                        &title,
+                        &description,
+                        color,
+                        Some(&format!("by @{}", e.sender.login)),
+                    )
+                    .await?;
+            }
+            ParsedEvent::Issue(e) => {
+                let has_bounty = e.issue.labels.iter().any(|l| l.name == "bounty");
+                let color = if has_bounty {
+                    COLOR_BOUNTY
+                } else {
+                    COLOR_ISSUE
+                };
+                let emoji = if has_bounty { "🪙" } else { "📋" };
+                let bounty_tag = if has_bounty { " (Bounty)" } else { "" };
+
+                let thread_name = format!(
+                    "{} Issue #{} opened{}: {}",
+                    emoji, e.issue.number, bounty_tag, e.issue.title
+                );
+                let title = e.issue.title.clone();
+                let description = format!(
+                    "Opened by @{}\n[View Issue]({})",
+                    e.sender.login, e.issue.html_url
+                );
+
+                self.discord
+                    .create_forum_thread_with_embed(
+                        forum_id,
+                        &thread_name,
+                        &title,
+                        &description,
+                        color,
+                        Some(&format!("by @{}", e.sender.login)),
+                    )
+                    .await?;
+            }
+            ParsedEvent::Release(e) => {
+                let thread_name = format!("🚀 Release {}", e.release.tag_name);
+                let title = format!("Release {}", e.release.tag_name);
+                let description = format!(
+                    "{}\n\n[View Release]({})",
+                    e.release.body.as_deref().unwrap_or(""),
+                    e.release.html_url
+                );
+
+                self.discord
+                    .create_forum_thread_with_embed(
+                        forum_id,
+                        &thread_name,
+                        &title,
+                        &description,
                         COLOR_SUCCESS,
                         Some(&format!("by @{}", e.sender.login)),
                     )

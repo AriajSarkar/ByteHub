@@ -49,6 +49,26 @@ pub async fn approve_project(pool: &PgPool, github_repo: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn approve_project_with_forum(
+    pool: &PgPool,
+    github_repo: &str,
+    forum_channel_id: &str,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "UPDATE projects SET is_approved = true, forum_channel_id = $2 WHERE github_repo = $1",
+    )
+    .bind(github_repo)
+    .bind(forum_channel_id)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if rows == 0 {
+        return Err(Error::NotFound("project not found".into()));
+    }
+    Ok(())
+}
+
 pub async fn deny_project(pool: &PgPool, github_repo: &str) -> Result<()> {
     sqlx::query("DELETE FROM projects WHERE github_repo = $1")
         .bind(github_repo)

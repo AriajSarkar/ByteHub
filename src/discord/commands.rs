@@ -169,38 +169,41 @@ async fn handle_approve(
         .as_ref()
         .ok_or(Error::InvalidPayload("missing guild_id".into()))?;
 
-    // Get server config to find the GitHub forum channel
+    let guild_id_u64: u64 = guild_id_str
+        .parse()
+        .map_err(|_| Error::InvalidPayload("invalid guild_id".into()))?;
+    let gid = twilight_model::id::Id::new(guild_id_u64);
+
+    // Get server config to find the GitHub category
     let config = server_config::get_config(&state.pool, guild_id_str)
         .await?
         .ok_or(Error::InvalidPayload(
             "Server not set up. Run /setup-server first.".into(),
         ))?;
 
-    // Parse forum channel ID
-    let forum_id: u64 = config
+    // Parse GitHub category ID (stored in github_forum_id field)
+    let category_id: u64 = config
         .github_forum_id
         .parse()
-        .map_err(|_| Error::InvalidPayload("invalid forum channel id".into()))?;
-    let forum_channel = twilight_model::id::Id::new(forum_id);
+        .map_err(|_| Error::InvalidPayload("invalid category id".into()))?;
+    let github_category = twilight_model::id::Id::new(category_id);
 
-    // Create a forum thread for this project
-    let thread_title = format!("📦 {}", repo);
-    let thread_content = format!(
-        "**GitHub Repository:** [`{}`](https://github.com/{})\n\n_GitHub events for this project will be posted here._",
-        repo, repo
-    );
+    // Extract project name from repo (e.g., "AriajSarkar/eventix" -> "eventix")
+    let project_name = repo.split('/').last().unwrap_or(repo);
 
-    state
+    // Create a forum channel for this project inside the GitHub category
+    let project_forum_id = state
         .discord
-        .create_forum_thread(forum_channel, &thread_title, &thread_content)
+        .create_project_forum(gid, github_category, project_name)
         .await?;
 
-    // Approve the project in database
-    projects::approve_project(&state.pool, repo).await?;
+    // Update project with the forum channel ID and approve
+    projects::approve_project_with_forum(&state.pool, repo, &project_forum_id.get().to_string())
+        .await?;
 
     Ok(format!(
-        "✅ Project `{}` approved! Thread created in <#{}>.",
-        repo, forum_id
+        "✅ Project `{}` approved!\n\nCreated forum: <#{}>",
+        repo, project_forum_id
     ))
 }
 
@@ -341,10 +344,10 @@ async fn handle_setup_server(
         None => state.discord.create_announcements_channel(gid).await?,
     };
 
-    // Find or create GitHub forum channel
-    let github_forum_id = match state.discord.find_channel_by_name(gid, "GitHub").await? {
+    // Find or create GitHub category (container for project forums)
+    let github_category_id = match state.discord.find_channel_by_name(gid, "GitHub").await? {
         Some(id) => id,
-        None => state.discord.create_github_forum(gid).await?,
+        None => state.discord.create_github_category(gid).await?,
     };
 
     // Create Mod category with channels
@@ -355,7 +358,7 @@ async fn handle_setup_server(
         &state.pool,
         guild_id_str,
         &announcements_id.get().to_string(),
-        &github_forum_id.get().to_string(),
+        &github_category_id.get().to_string(),
         Some(&mod_cat_id.get().to_string()),
         Some(&review_id.get().to_string()),
         Some(&approvals_id.get().to_string()),
@@ -363,7 +366,7 @@ async fn handle_setup_server(
     .await?;
 
     Ok(format!(
-        "✅ **Server setup complete!**\n\n**Created channels:**\n• <#{}> - Announcements\n• <#{}> - GitHub Forum\n• <#{}> - Mod (project-review)\n• <#{}> - Mod (approvals)",
-        announcements_id, github_forum_id, review_id, approvals_id
+        "✅ **Server setup complete!**\n\n**Created channels:**\n• <#{}> - Announcements\n• <#{}> - GitHub (Category)\n• <#{}> - Mod (project-review)\n• <#{}> - Mod (approvals)",
+        announcements_id, github_category_id, review_id, approvals_id
     ))
 }

@@ -41,15 +41,36 @@ impl DiscordClient {
         Ok(channel.id)
     }
 
-    /// Create GitHub forum channel
-    pub async fn create_github_forum(
+    /// Create GitHub category (container for project forums)
+    pub async fn create_github_category(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<Id<ChannelMarker>> {
         let channel = self
             .http
             .create_guild_channel(guild_id, "GitHub")
+            .kind(ChannelType::GuildCategory)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        Ok(channel.id)
+    }
+
+    /// Create a forum channel for a project inside a category
+    pub async fn create_project_forum(
+        &self,
+        guild_id: Id<GuildMarker>,
+        category_id: Id<ChannelMarker>,
+        project_name: &str,
+    ) -> Result<Id<ChannelMarker>> {
+        let channel = self
+            .http
+            .create_guild_channel(guild_id, project_name)
             .kind(ChannelType::GuildForum)
+            .parent_id(category_id)
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()

@@ -21,13 +21,13 @@ pub struct Interaction {
     pub id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct InteractionData {
     pub name: String,
     pub options: Option<Vec<CommandOption>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CommandOption {
     pub name: String,
     pub value: serde_json::Value,
@@ -102,10 +102,44 @@ pub async fn handle_interaction(
             .ok_or(Error::InvalidPayload("missing data".into()))?;
         let member = interaction.member.as_ref();
 
+        // Commands that need deferred response (channel creation takes >3s)
+        if data.name == "setup-server" || data.name == "approve" {
+            check_moderator(member)?;
+            let cmd_name = data.name.clone();
+            let guild_id = interaction.guild_id.clone();
+            let token = interaction.token.clone();
+            let app_id = state.discord.application_id;
+            let state_clone = state.clone();
+            let data_clone = data.clone();
+
+            tokio::spawn(async move {
+                let result = match cmd_name.as_str() {
+                    "setup-server" => do_setup_server(&state_clone, &guild_id).await,
+                    "approve" => do_approve(&state_clone, &data_clone, &guild_id).await,
+                    _ => Ok("Unknown".to_string()),
+                };
+
+                let content = match result {
+                    Ok(msg) => msg,
+                    Err(e) => format!("❌ Error: {}", e),
+                };
+
+                let url = format!("https://discord.com/api/v10/webhooks/{}/{}", app_id, token);
+                let _ = reqwest::Client::new()
+                    .post(&url)
+                    .json(&serde_json::json!({ "content": content, "flags": 64 }))
+                    .send()
+                    .await;
+            });
+
+            return Ok(Json(InteractionResponse {
+                kind: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+                data: None,
+            }));
+        }
+
         let response = match data.name.as_str() {
-            "setup-server" => handle_setup_server(&state, member, &interaction.guild_id).await?,
             "submit-project" => handle_submit_project(&state.pool, data).await?,
-            "approve" => handle_approve(&state, member, data, &interaction.guild_id).await?,
             "deny" => handle_deny(&state.pool, member, data).await?,
             "whitelist-user" => handle_whitelist(&state.pool, member, data).await?,
             "list" => handle_list(&state.pool, member).await?,
@@ -142,14 +176,11 @@ async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<
     Ok(format!("Project `{}` submitted for approval.", repo))
 }
 
-async fn handle_approve(
+async fn do_approve(
     state: &AppState,
-    member: Option<&Member>,
     data: &InteractionData,
     guild_id: &Option<String>,
 ) -> Result<String> {
-    check_moderator(member)?;
-
     let opts = data
         .options
         .as_ref()
@@ -304,13 +335,7 @@ async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
 
 use twilight_model::id::Id;
 
-async fn handle_setup_server(
-    state: &AppState,
-    member: Option<&Member>,
-    guild_id: &Option<String>,
-) -> Result<String> {
-    check_moderator(member)?;
-
+async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<String> {
     let guild_id_str = guild_id
         .as_ref()
         .ok_or(Error::InvalidPayload("missing guild_id".into()))?;

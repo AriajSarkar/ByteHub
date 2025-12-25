@@ -7,6 +7,7 @@ pub struct Config {
     pub discord_public_key: String,
     pub discord_bot_token: String,
     pub discord_application_id: u64,
+    pub discord_invite: Option<String>,
     pub host: String,
     pub port: u16,
 }
@@ -24,6 +25,7 @@ impl Config {
                 .expect("DISCORD_APPLICATION_ID required")
                 .parse()
                 .expect("DISCORD_APPLICATION_ID must be a valid u64"),
+            discord_invite: env::var("DISCORD_INVITE").ok(),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "3000".into())

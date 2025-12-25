@@ -120,6 +120,29 @@ impl DiscordClient {
             .map_err(|e| Error::Discord(e.to_string()))?;
         Ok(())
     }
+
+    /// Secure a thread (Lock + Keep Unarchived + Manual Pin)
+    pub async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
+        // 1. Standard library call for Locked + Unarchived
+        self.http
+            .update_thread(thread_id)
+            .archived(false)
+            .locked(true)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        // 2. Manual HTTP Patch for Pinning (Flag: 1 << 1)
+        // This is a workaround for library version limitations.
+        let url = format!("https://discord.com/api/v10/channels/{}", thread_id);
+        let _ = reqwest::Client::new()
+            .patch(&url)
+            .header("Authorization", format!("Bot {}", self.token))
+            .json(&serde_json::json!({ "flags": 2 }))
+            .send()
+            .await;
+
+        Ok(())
+    }
 }
 
 pub fn format_release(event: &crate::github::events::ReleaseEvent) -> (String, String) {

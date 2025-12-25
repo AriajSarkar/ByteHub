@@ -8,6 +8,11 @@ use crate::error::{Error, Result};
 use crate::governance::{projects, server_config, whitelist};
 use crate::AppState;
 
+use twilight_model::guild::Permissions;
+use twilight_model::id::Id;
+
+const REQUIRED_PERMISSIONS: Permissions = Permissions::from_bits_retain(326417599504);
+
 #[derive(Debug, Deserialize)]
 pub struct Interaction {
     #[serde(rename = "type")]
@@ -198,7 +203,24 @@ async fn do_approve(
     let guild_id_u64: u64 = guild_id_str
         .parse()
         .map_err(|_| Error::InvalidPayload("invalid guild_id".into()))?;
-    let gid = twilight_model::id::Id::new(guild_id_u64);
+    let gid = Id::new(guild_id_u64);
+
+    // Verify permissions first
+    let perms = state.discord.get_self_permissions(gid).await?;
+    if !perms.contains(REQUIRED_PERMISSIONS) {
+        let missing = REQUIRED_PERMISSIONS - perms;
+        let invite_msg = match &state.config.discord_invite {
+            Some(url) => format!(
+                "\n\nUse this link to re-invite me with correct permissions: {}",
+                url
+            ),
+            None => "".into(),
+        };
+        return Err(Error::Discord(format!(
+            "Missing permissions: `{:?}`. Please update my role.{}",
+            missing, invite_msg
+        )));
+    }
 
     // Get server config to find the GitHub category
     let config = server_config::get_config(&state.pool, guild_id_str)
@@ -410,8 +432,6 @@ async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
     Ok(response)
 }
 
-use twilight_model::id::Id;
-
 async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<String> {
     let guild_id_str = guild_id
         .as_ref()
@@ -422,6 +442,23 @@ async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<
         .map_err(|_| Error::InvalidPayload("invalid guild_id".into()))?;
 
     let gid = Id::new(guild_id_u64);
+
+    // Verify permissions first
+    let perms = state.discord.get_self_permissions(gid).await?;
+    if !perms.contains(REQUIRED_PERMISSIONS) {
+        let missing = REQUIRED_PERMISSIONS - perms;
+        let invite_msg = match &state.config.discord_invite {
+            Some(url) => format!(
+                "\n\nUse this link to re-invite me with correct permissions: {}",
+                url
+            ),
+            None => "".into(),
+        };
+        return Err(Error::Discord(format!(
+            "Missing permissions: `{:?}`. Please update my role or re-invite me.{}",
+            missing, invite_msg
+        )));
+    }
 
     // Always find or create channels (handles deleted/stale channels)
     let announcements_id = match state

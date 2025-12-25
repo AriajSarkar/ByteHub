@@ -433,7 +433,9 @@ impl Dispatcher {
                 .send_message_with_embed(tid, &title, &description, color, footer_text.as_deref())
                 .await?;
         } else {
-            self.discord
+            // Create as public forum thread, but then immediately lock and pin
+            let tid = self
+                .discord
                 .create_forum_thread_with_embed(
                     forum_id,
                     thread_name,
@@ -443,6 +445,9 @@ impl Dispatcher {
                     footer_text.as_deref(),
                 )
                 .await?;
+
+            // Secure the thread (Lock + Keep Unarchived)
+            let _ = self.discord.secure_thread(tid).await;
         }
 
         Ok(())

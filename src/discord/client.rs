@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 pub struct DiscordClient {
     pub http: Arc<Client>,
     pub application_id: Id<ApplicationMarker>,
+    pub token: String,
 }
 
 impl DiscordClient {
@@ -20,6 +21,7 @@ impl DiscordClient {
         Self {
             http,
             application_id: Id::new(application_id),
+            token: token.to_string(),
         }
     }
 
@@ -189,5 +191,47 @@ impl DiscordClient {
             }
         }
         Ok(None)
+    }
+
+    /// Get the bot's own permissions in a specific guild
+    pub async fn get_self_permissions(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<twilight_model::guild::Permissions> {
+        let member = self
+            .http
+            .guild_member(guild_id, self.application_id.cast())
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        // Calculate permissions based on roles and overrides
+        // In a real scenario, we'd need more logic, but for simple bot roles:
+        // Discord's guild_member endpoint doesn't return computed permissions.
+        // However, we can use the roles to find the permissions.
+        // Actually, the easiest way is to fetch the roles from the guild.
+        let guild_roles = self
+            .http
+            .roles(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        let mut permissions = twilight_model::guild::Permissions::empty();
+        for role_id in member.roles {
+            if let Some(role) = guild_roles.iter().find(|r| r.id == role_id) {
+                permissions |= role.permissions;
+            }
+        }
+        // Also add @everyone permissions
+        if let Some(everyone) = guild_roles.iter().find(|r| r.id == guild_id.cast()) {
+            permissions |= everyone.permissions;
+        }
+
+        Ok(permissions)
     }
 }

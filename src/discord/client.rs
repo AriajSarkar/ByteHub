@@ -1,12 +1,85 @@
+use crate::error::{Error, Result};
+use async_trait::async_trait;
 use std::sync::Arc;
 use twilight_http::Client;
+use twilight_model::channel::message::embed::{Embed, EmbedFooter};
 use twilight_model::channel::ChannelType;
 use twilight_model::id::{
     marker::{ApplicationMarker, ChannelMarker, GuildMarker},
     Id,
 };
 
-use crate::error::{Error, Result};
+#[async_trait]
+pub trait DiscordInterface: Send + Sync {
+    async fn create_announcements_channel(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<Id<ChannelMarker>>;
+    async fn create_github_category(&self, guild_id: Id<GuildMarker>) -> Result<Id<ChannelMarker>>;
+    async fn create_project_forum(
+        &self,
+        guild_id: Id<GuildMarker>,
+        category_id: Id<ChannelMarker>,
+        project_name: &str,
+    ) -> Result<Id<ChannelMarker>>;
+    async fn create_mod_category(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)>;
+    async fn find_channel_by_name(
+        &self,
+        guild_id: Id<GuildMarker>,
+        name: &str,
+    ) -> Result<Option<Id<ChannelMarker>>>;
+    async fn create_channel_in_category(
+        &self,
+        guild_id: Id<GuildMarker>,
+        category_id: Id<ChannelMarker>,
+        name: &str,
+    ) -> Result<Id<ChannelMarker>>;
+    async fn find_active_thread_by_name(
+        &self,
+        guild_id: Id<GuildMarker>,
+        parent_id: Id<ChannelMarker>,
+        name: &str,
+    ) -> Result<Option<Id<ChannelMarker>>>;
+    async fn get_self_permissions(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<twilight_model::guild::Permissions>;
+    async fn guild_channels(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<Vec<twilight_model::channel::Channel>>;
+    fn application_id(&self) -> Id<ApplicationMarker>;
+
+    // Forum & Messaging
+    async fn create_forum_thread(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        name: &str,
+        content: &str,
+    ) -> Result<Id<ChannelMarker>>;
+    async fn create_forum_thread_with_embed(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        thread_name: &str,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<Id<ChannelMarker>>;
+    async fn send_message(&self, channel_id: Id<ChannelMarker>, content: &str) -> Result<()>;
+    async fn send_message_with_embed(
+        &self,
+        thread_id: Id<ChannelMarker>,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<()>;
+    async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()>;
+}
 
 #[derive(Clone)]
 pub struct DiscordClient {
@@ -24,9 +97,12 @@ impl DiscordClient {
             token: token.to_string(),
         }
     }
+}
 
+#[async_trait]
+impl DiscordInterface for DiscordClient {
     /// Create announcements channel (text channel)
-    pub async fn create_announcements_channel(
+    async fn create_announcements_channel(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<Id<ChannelMarker>> {
@@ -44,10 +120,7 @@ impl DiscordClient {
     }
 
     /// Create GitHub category (container for project forums)
-    pub async fn create_github_category(
-        &self,
-        guild_id: Id<GuildMarker>,
-    ) -> Result<Id<ChannelMarker>> {
+    async fn create_github_category(&self, guild_id: Id<GuildMarker>) -> Result<Id<ChannelMarker>> {
         let channel = self
             .http
             .create_guild_channel(guild_id, "GitHub")
@@ -62,7 +135,7 @@ impl DiscordClient {
     }
 
     /// Create a forum channel for a project inside a category
-    pub async fn create_project_forum(
+    async fn create_project_forum(
         &self,
         guild_id: Id<GuildMarker>,
         category_id: Id<ChannelMarker>,
@@ -83,7 +156,7 @@ impl DiscordClient {
     }
 
     /// Create private Mod category with channels
-    pub async fn create_mod_category(
+    async fn create_mod_category(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)> {
@@ -126,7 +199,7 @@ impl DiscordClient {
     }
 
     /// Find channel by name in guild
-    pub async fn find_channel_by_name(
+    async fn find_channel_by_name(
         &self,
         guild_id: Id<GuildMarker>,
         name: &str,
@@ -149,7 +222,7 @@ impl DiscordClient {
     }
 
     /// Create a text channel in an existing category
-    pub async fn create_channel_in_category(
+    async fn create_channel_in_category(
         &self,
         guild_id: Id<GuildMarker>,
         category_id: Id<ChannelMarker>,
@@ -170,7 +243,7 @@ impl DiscordClient {
     }
 
     /// Find active thread by name in a channel (forum or text)
-    pub async fn find_active_thread_by_name(
+    async fn find_active_thread_by_name(
         &self,
         guild_id: Id<GuildMarker>,
         parent_id: Id<ChannelMarker>,
@@ -194,7 +267,7 @@ impl DiscordClient {
     }
 
     /// Get the bot's own permissions in a specific guild
-    pub async fn get_self_permissions(
+    async fn get_self_permissions(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<twilight_model::guild::Permissions> {
@@ -233,5 +306,149 @@ impl DiscordClient {
         }
 
         Ok(permissions)
+    }
+
+    async fn guild_channels(
+        &self,
+        guild_id: Id<GuildMarker>,
+    ) -> Result<Vec<twilight_model::channel::Channel>> {
+        let channels = self
+            .http
+            .guild_channels(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(channels)
+    }
+
+    fn application_id(&self) -> Id<ApplicationMarker> {
+        self.application_id
+    }
+
+    async fn create_forum_thread(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        name: &str,
+        content: &str,
+    ) -> Result<Id<ChannelMarker>> {
+        let thread = self
+            .http
+            .create_forum_thread(channel_id, name)
+            .message()
+            .content(content)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(thread.channel.id)
+    }
+
+    async fn create_forum_thread_with_embed(
+        &self,
+        channel_id: Id<ChannelMarker>,
+        thread_name: &str,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<Id<ChannelMarker>> {
+        let embed = Embed {
+            author: None,
+            color: Some(color),
+            description: Some(description.to_string()),
+            fields: vec![],
+            footer: footer.map(|f| EmbedFooter {
+                icon_url: None,
+                proxy_icon_url: None,
+                text: f.to_string(),
+            }),
+            image: None,
+            kind: "rich".to_string(),
+            provider: None,
+            thumbnail: None,
+            timestamp: None,
+            title: Some(title.to_string()),
+            url: None,
+            video: None,
+        };
+
+        let thread = self
+            .http
+            .create_forum_thread(channel_id, thread_name)
+            .message()
+            .embeds(&[embed])
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(thread.channel.id)
+    }
+
+    async fn send_message(&self, channel_id: Id<ChannelMarker>, content: &str) -> Result<()> {
+        self.http
+            .create_message(channel_id)
+            .content(content)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn send_message_with_embed(
+        &self,
+        thread_id: Id<ChannelMarker>,
+        title: &str,
+        description: &str,
+        color: u32,
+        footer: Option<&str>,
+    ) -> Result<()> {
+        let embed = Embed {
+            author: None,
+            color: Some(color),
+            description: Some(description.to_string()),
+            fields: vec![],
+            footer: footer.map(|f| EmbedFooter {
+                icon_url: None,
+                proxy_icon_url: None,
+                text: f.to_string(),
+            }),
+            image: None,
+            kind: "rich".to_string(),
+            provider: None,
+            thumbnail: None,
+            timestamp: None,
+            title: Some(title.to_string()),
+            url: None,
+            video: None,
+        };
+
+        self.http
+            .create_message(thread_id)
+            .embeds(&[embed])
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
+        self.http
+            .update_thread(thread_id)
+            .archived(false)
+            .locked(true)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        let url = format!("https://discord.com/api/v10/channels/{}", thread_id);
+        let _ = reqwest::Client::new()
+            .patch(&url)
+            .header("Authorization", format!("Bot {}", self.token))
+            .json(&serde_json::json!({ "flags": 2 }))
+            .send()
+            .await;
+
+        Ok(())
     }
 }

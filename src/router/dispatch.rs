@@ -2,19 +2,22 @@ use sqlx::PgPool;
 use tracing::info;
 use twilight_model::id::Id;
 
-use crate::discord::client::DiscordClient;
-use crate::discord::forum::{COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS};
-use crate::error::{Error, Result};
+use crate::discord::client::DiscordInterface;
+use crate::discord::formatters::{
+    COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS,
+};
+use crate::error::Result;
 use crate::github::events::ParsedEvent;
 use crate::governance::projects;
+use std::sync::Arc;
 
 pub struct Dispatcher {
     pool: PgPool,
-    discord: DiscordClient,
+    discord: Arc<dyn DiscordInterface>,
 }
 
 impl Dispatcher {
-    pub fn new(pool: PgPool, discord: DiscordClient) -> Self {
+    pub fn new(pool: PgPool, discord: Arc<dyn DiscordInterface>) -> Self {
         Self { pool, discord }
     }
 
@@ -68,7 +71,7 @@ impl Dispatcher {
         Ok(())
     }
 
-    fn should_log(&self, event: &ParsedEvent) -> bool {
+    pub fn should_log(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
                 if e.action != "completed" {
@@ -84,7 +87,7 @@ impl Dispatcher {
         }
     }
 
-    fn should_post(&self, event: &ParsedEvent) -> bool {
+    pub fn should_post(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
                 if !self.should_log(event) {
@@ -107,7 +110,7 @@ impl Dispatcher {
         }
     }
 
-    fn should_announce(&self, event: &ParsedEvent) -> bool {
+    pub fn should_announce(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::Release(_) => true,
             ParsedEvent::Issue(e) => e.issue.labels.iter().any(|l| l.name == "bounty"),
@@ -116,7 +119,7 @@ impl Dispatcher {
         }
     }
 
-    fn is_bot_actor(&self, login: &str) -> bool {
+    pub fn is_bot_actor(&self, login: &str) -> bool {
         let bots = ["dependabot", "renovate", "github-actions"];
         bots.iter().any(|b| login.to_lowercase().contains(b))
     }
@@ -127,15 +130,7 @@ impl Dispatcher {
         repo: &str,
         guild_id: Id<twilight_model::id::marker::GuildMarker>,
     ) -> Result<Id<twilight_model::id::marker::ChannelMarker>> {
-        let channels = self
-            .discord
-            .http
-            .guild_channels(guild_id)
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?
-            .model()
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?;
+        let channels = self.discord.guild_channels(guild_id).await?;
 
         if !project.forum_channel_id.is_empty() {
             if let Ok(id_u64) = project.forum_channel_id.parse::<u64>() {

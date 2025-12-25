@@ -113,7 +113,7 @@ pub async fn handle_interaction(
             let cmd_name = data.name.clone();
             let guild_id = interaction.guild_id.clone();
             let token = interaction.token.clone();
-            let app_id = state.discord.application_id;
+            let app_id = state.discord.application_id();
             let state_clone = state.clone();
             let data_clone = data.clone();
 
@@ -181,7 +181,7 @@ async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<
     Ok(format!("Project `{}` submitted for approval.", repo))
 }
 
-async fn do_approve(
+pub async fn do_approve(
     state: &AppState,
     data: &InteractionData,
     guild_id: &Option<String>,
@@ -270,17 +270,16 @@ async fn do_approve(
     let project_name = repo.split('/').last().unwrap_or(repo);
 
     // Check if project already has a forum channel and if it still exists in Discord
-    let channels = state
-        .discord
-        .http
-        .guild_channels(gid)
-        .await
-        .map_err(|e| Error::Discord(e.to_string()))?
-        .model()
-        .await
-        .map_err(|e| Error::Discord(e.to_string()))?;
+    let channels = state.discord.guild_channels(gid).await?;
 
     let existing_project = projects::get_project(&state.pool, repo).await?;
+
+    if let Some(p) = &existing_project {
+        if p.is_approved {
+            return Err(Error::InvalidPayload("Project is already approved".into()));
+        }
+    }
+
     let (project_forum_id, is_new) = if let Some(p) = existing_project {
         let mut found_id = None;
         if !p.forum_channel_id.is_empty() {
@@ -432,7 +431,7 @@ async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
     Ok(response)
 }
 
-async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<String> {
+pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Result<String> {
     let guild_id_str = guild_id
         .as_ref()
         .ok_or(Error::InvalidPayload("missing guild_id".into()))?;

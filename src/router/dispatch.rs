@@ -37,7 +37,7 @@ impl Dispatcher {
         let forum_id = self.ensure_forum_exists(&project, &repo, guild_id).await?;
 
         // 1. Log to the persistent "Project Activity" thread
-        if !self.is_bot_actor(event.actor().unwrap_or("")) {
+        if !self.is_bot_actor(event.actor().unwrap_or("")) && self.should_log(&event) {
             let activity_tid_str = self
                 .get_or_create_thread(&project, &repo, forum_id, guild_id)
                 .await?;
@@ -68,14 +68,26 @@ impl Dispatcher {
         Ok(())
     }
 
-    fn should_post(&self, event: &ParsedEvent) -> bool {
+    fn should_log(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
                 if e.action != "completed" {
                     return false;
                 }
                 let conclusion = e.workflow_run.conclusion.as_deref().unwrap_or("unknown");
-                if conclusion == "skipped" || conclusion == "cancelled" {
+                conclusion == "success" || conclusion == "failure"
+            }
+            ParsedEvent::PullRequest(_) => true,
+            ParsedEvent::Issue(_) => true,
+            ParsedEvent::Release(_) => true,
+            ParsedEvent::Unknown => false,
+        }
+    }
+
+    fn should_post(&self, event: &ParsedEvent) -> bool {
+        match event {
+            ParsedEvent::WorkflowRun(e) => {
+                if !self.should_log(event) {
                     return false;
                 }
                 let branch = e.workflow_run.head_branch.as_deref().unwrap_or("");

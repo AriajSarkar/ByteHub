@@ -166,4 +166,28 @@ impl DiscordClient {
 
         Ok(channel.id)
     }
+
+    /// Find active thread by name in a channel (forum or text)
+    pub async fn find_active_thread_by_name(
+        &self,
+        guild_id: Id<GuildMarker>,
+        parent_id: Id<ChannelMarker>,
+        name: &str,
+    ) -> Result<Option<Id<ChannelMarker>>> {
+        let threads = self
+            .http
+            .active_threads(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        for thread in threads.threads {
+            if thread.parent_id == Some(parent_id) && thread.name.as_deref() == Some(name) {
+                return Ok(Some(thread.id));
+            }
+        }
+        Ok(None)
+    }
 }

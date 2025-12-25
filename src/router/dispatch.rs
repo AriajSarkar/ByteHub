@@ -4,7 +4,7 @@ use twilight_model::id::Id;
 
 use crate::discord::client::DiscordClient;
 use crate::discord::forum::{COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::github::events::ParsedEvent;
 use crate::governance::projects;
 
@@ -20,11 +20,11 @@ impl Dispatcher {
 
     pub async fn dispatch(&self, event: ParsedEvent) -> Result<()> {
         let repo = match event.repo_full_name() {
-            Some(r) => r,
+            Some(r) => r.to_lowercase(),
             None => return Ok(()),
         };
 
-        let project = match projects::get_approved_project(&self.pool, repo).await? {
+        let project = match projects::get_approved_project(&self.pool, &repo).await? {
             Some(p) => p,
             None => {
                 info!(repo, "event from unlisted/unapproved project, ignoring");
@@ -32,71 +32,69 @@ impl Dispatcher {
             }
         };
 
-        // Apply smart filtering
-        if !self.should_post(&event) {
-            info!(repo, "event filtered out by smart filtering");
-            return Ok(());
-        }
+        // Ensure forum exists and is synced
+        let guild_id = Id::new(project.guild_id.parse::<u64>().unwrap_or(0));
+        let forum_id = self.ensure_forum_exists(&project, &repo, guild_id).await?;
 
         // 1. Log to the persistent "Project Activity" thread
-        let activity_tid_str = self.get_or_create_thread(&project, repo).await?;
-        let activity_tid = Id::new(activity_tid_str.parse::<u64>().unwrap_or(0));
-        self.post_event_to_thread(activity_tid, &event).await?;
-        info!(repo, "logged event to project activity thread");
+        if !self.is_bot_actor(event.actor().unwrap_or("")) {
+            let activity_tid_str = self
+                .get_or_create_thread(&project, &repo, forum_id, guild_id)
+                .await?;
+            let activity_tid = Id::new(activity_tid_str.parse::<u64>().unwrap_or(0));
+            if let Err(e) = self.post_event_to_thread(activity_tid, &event).await {
+                info!(repo, error = %e, "failed to post to activity thread");
+            } else {
+                info!(repo, "logged event to project activity thread");
+            }
+        }
 
-        // 2. Create a NEW dedicated thread for this specific event
-        let forum_id = Id::new(project.forum_channel_id.parse::<u64>().unwrap_or(0));
-        self.create_dedicated_thread(forum_id, &event).await?;
-        info!(repo, "created dedicated thread for event");
+        // 2. Manage dedicated Sidebar threads for major milestones
+        if self.should_post(&event) {
+            if let Err(e) = self.manage_sidebar_thread(guild_id, forum_id, &event).await {
+                info!(repo, error = %e, "failed to manage sidebar thread");
+            } else {
+                info!(repo, "handled sidebar thread for event");
+            }
+        }
 
-        // 3. Check if should also post to announcements
+        // 3. Post to announcements if applicable
         if self.should_announce(&event) {
-            self.post_to_announcements(&event, repo).await?;
+            if let Err(e) = self.post_to_announcements(&event, &project).await {
+                info!(repo, error = %e, "failed to post announcement");
+            }
         }
 
         Ok(())
     }
 
-    /// Smart filtering logic
     fn should_post(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
-                // ONLY post when completed (avoids 'unknown' status)
                 if e.action != "completed" {
                     return false;
                 }
-                // Skip cancelled/skipped CI
                 let conclusion = e.workflow_run.conclusion.as_deref().unwrap_or("unknown");
                 if conclusion == "skipped" || conclusion == "cancelled" {
                     return false;
                 }
-                // Only main/master branch for CI
                 let branch = e.workflow_run.head_branch.as_deref().unwrap_or("");
                 branch == "main" || branch == "master"
             }
             ParsedEvent::PullRequest(e) => {
-                // Skip bots (dependabot, renovate, etc.)
                 if self.is_bot_actor(e.sender.login.as_str()) {
                     return false;
                 }
-                // Post on opened, merged, or labeled (for bounty)
                 e.action == "opened"
                     || (e.action == "closed" && e.pull_request.merged.unwrap_or(false))
                     || e.action == "labeled"
             }
-            ParsedEvent::Issue(e) => {
-                // Post on opened or labeled (for bounty)
-                e.action == "opened" || e.action == "labeled"
-            }
-            ParsedEvent::Release(e) => {
-                // Only handle published releases
-                e.action == "published"
-            }
+            ParsedEvent::Issue(e) => e.action == "opened" || e.action == "labeled",
+            ParsedEvent::Release(e) => e.action == "published",
             ParsedEvent::Unknown => false,
         }
     }
 
-    /// Check if event should go to announcements
     fn should_announce(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::Release(_) => true,
@@ -107,35 +105,92 @@ impl Dispatcher {
     }
 
     fn is_bot_actor(&self, login: &str) -> bool {
-        let bots = [
-            "dependabot",
-            "dependabot[bot]",
-            "renovate",
-            "renovate[bot]",
-            "github-actions",
-            "github-actions[bot]",
-        ];
+        let bots = ["dependabot", "renovate", "github-actions"];
         bots.iter().any(|b| login.to_lowercase().contains(b))
+    }
+
+    async fn ensure_forum_exists(
+        &self,
+        project: &projects::Project,
+        repo: &str,
+        guild_id: Id<twilight_model::id::marker::GuildMarker>,
+    ) -> Result<Id<twilight_model::id::marker::ChannelMarker>> {
+        let channels = self
+            .discord
+            .http
+            .guild_channels(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        if !project.forum_channel_id.is_empty() {
+            if let Ok(id_u64) = project.forum_channel_id.parse::<u64>() {
+                let id = Id::new(id_u64);
+                if channels.iter().any(|c| c.id == id) {
+                    return Ok(id);
+                }
+            }
+        }
+
+        // Forum missing, re-create
+        info!(repo, "forum channel missing, re-creating and syncing");
+
+        // Find or create category
+        let category_id = match self
+            .discord
+            .find_channel_by_name(guild_id, "GitHub")
+            .await?
+        {
+            Some(id) => id,
+            None => self.discord.create_github_category(guild_id).await?,
+        };
+
+        let project_name = repo.split('/').last().unwrap_or(repo);
+        let new_forum_id = self
+            .discord
+            .create_project_forum(guild_id, category_id, project_name)
+            .await?;
+
+        // Sync to DB
+        projects::update_forum_id(&self.pool, repo, &new_forum_id.get().to_string()).await?;
+
+        Ok(new_forum_id)
     }
 
     async fn get_or_create_thread(
         &self,
         project: &projects::Project,
         repo: &str,
+        forum_id: Id<twilight_model::id::marker::ChannelMarker>,
+        guild_id: Id<twilight_model::id::marker::GuildMarker>,
     ) -> Result<String> {
-        // If thread already exists, use it
-        if let Some(ref tid) = project.thread_id {
-            if !tid.is_empty() {
-                return Ok(tid.clone());
-            }
-        }
-
-        // Create new thread in the project's forum channel
-        let forum_id = Id::new(project.forum_channel_id.parse::<u64>().unwrap_or(0));
         let project_name = repo.split('/').last().unwrap_or(repo);
         let thread_name = format!("📦 {} Activity", project_name);
 
-        // Create the initial thread
+        // If thread ID exists in DB, verify it still exists in Discord
+        if let Some(ref tid_str) = project.thread_id {
+            if !tid_str.is_empty() {
+                if let Ok(tid_u64) = tid_str.parse::<u64>() {
+                    let tid = Id::new(tid_u64);
+
+                    // We can't efficiently check if a specific ID is valid without a 404,
+                    // so we use our find_active_thread_by_name helper.
+                    if let Ok(Some(found_id)) = self
+                        .discord
+                        .find_active_thread_by_name(guild_id, forum_id, &thread_name)
+                        .await
+                    {
+                        if found_id == tid {
+                            return Ok(tid_str.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create new thread if not found or stale
         let tid = self
             .discord
             .create_forum_thread(
@@ -145,7 +200,6 @@ impl Dispatcher {
             )
             .await?;
 
-        // Save the thread ID to the database
         let tid_str = tid.get().to_string();
         projects::update_thread_id(&self.pool, repo, &tid_str).await?;
 
@@ -154,7 +208,7 @@ impl Dispatcher {
 
     async fn post_event_to_thread(
         &self,
-        thread_id: twilight_model::id::Id<twilight_model::id::marker::ChannelMarker>,
+        thread_id: Id<twilight_model::id::marker::ChannelMarker>,
         event: &ParsedEvent,
     ) -> Result<()> {
         match event {
@@ -259,12 +313,13 @@ impl Dispatcher {
         Ok(())
     }
 
-    async fn create_dedicated_thread(
+    async fn manage_sidebar_thread(
         &self,
+        guild_id: Id<twilight_model::id::marker::GuildMarker>,
         forum_id: Id<twilight_model::id::marker::ChannelMarker>,
         event: &ParsedEvent,
     ) -> Result<()> {
-        match event {
+        let (thread_name, title, description, color, footer_text) = match event {
             ParsedEvent::WorkflowRun(e) => {
                 let conclusion = e.workflow_run.conclusion.as_deref().unwrap_or("unknown");
                 let color = if conclusion == "success" {
@@ -280,22 +335,16 @@ impl Dispatcher {
                 let name = e.workflow_run.name.as_deref().unwrap_or("CI");
                 let branch = e.workflow_run.head_branch.as_deref().unwrap_or("unknown");
 
-                let title = format!("{} Run Details", name);
-                let description = format!(
-                    "**{}** - {}\nBranch: `{}`\n[View Run]({})",
-                    name, conclusion, branch, e.workflow_run.html_url
-                );
-
-                self.discord
-                    .create_forum_thread_with_embed(
-                        forum_id,
-                        thread_name,
-                        &title,
-                        &description,
-                        color,
-                        Some(&format!("Branch: {}", branch)),
-                    )
-                    .await?;
+                (
+                    thread_name,
+                    format!("{} Run Details", name),
+                    format!(
+                        "**{}** - {}\nBranch: `{}`\n[View Run]({})",
+                        name, conclusion, branch, e.workflow_run.html_url
+                    ),
+                    color,
+                    Some(format!("Branch: {}", branch)),
+                )
             }
             ParsedEvent::PullRequest(e) => {
                 let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
@@ -308,27 +357,21 @@ impl Dispatcher {
                     "🧩 PR Merged"
                 };
 
-                let title = e.pull_request.title.clone();
                 let action_verb = if e.action == "opened" {
                     "Opened"
                 } else {
                     "Merged"
                 };
-                let description = format!(
-                    "{} by @{}\n[View PR]({})",
-                    action_verb, e.sender.login, e.pull_request.html_url
-                );
-
-                self.discord
-                    .create_forum_thread_with_embed(
-                        forum_id,
-                        thread_name,
-                        &title,
-                        &description,
-                        color,
-                        Some(&format!("by @{}", e.sender.login)),
-                    )
-                    .await?;
+                (
+                    thread_name,
+                    e.pull_request.title.clone(),
+                    format!(
+                        "{} by @{}\n[View PR]({})",
+                        action_verb, e.sender.login, e.pull_request.html_url
+                    ),
+                    color,
+                    Some(format!("by @{}", e.sender.login)),
+                )
             }
             ParsedEvent::Issue(e) => {
                 let has_bounty = e.issue.labels.iter().any(|l| l.name == "bounty");
@@ -343,74 +386,111 @@ impl Dispatcher {
                     "📋 Other issues"
                 };
 
-                let title = e.issue.title.clone();
-                let description = format!(
-                    "Opened by @{}\n[View Issue]({})",
-                    e.sender.login, e.issue.html_url
-                );
-
-                self.discord
-                    .create_forum_thread_with_embed(
-                        forum_id,
-                        thread_name,
-                        &title,
-                        &description,
-                        color,
-                        Some(&format!("by @{}", e.sender.login)),
-                    )
-                    .await?;
+                (
+                    thread_name,
+                    e.issue.title.clone(),
+                    format!(
+                        "Opened by @{}\n[View Issue]({})",
+                        e.sender.login, e.issue.html_url
+                    ),
+                    color,
+                    Some(format!("by @{}", e.sender.login)),
+                )
             }
-            ParsedEvent::Release(e) => {
-                let thread_name = "🚀 Release Published";
-                let title = format!("Release {}", e.release.tag_name);
-                let description = format!(
+            ParsedEvent::Release(e) => (
+                "🚀 Release Published",
+                format!("Release {}", e.release.tag_name),
+                format!(
                     "{}\n\n[View Release]({})",
                     e.release.body.as_deref().unwrap_or(""),
                     e.release.html_url
-                );
+                ),
+                COLOR_SUCCESS,
+                Some(format!("by @{}", e.sender.login)),
+            ),
+            _ => return Ok(()),
+        };
 
-                self.discord
-                    .create_forum_thread_with_embed(
-                        forum_id,
-                        thread_name,
-                        &title,
-                        &description,
-                        COLOR_SUCCESS,
-                        Some(&format!("by @{}", e.sender.login)),
-                    )
-                    .await?;
-            }
-            _ => {}
+        // Reuse thread if it exists
+        if let Some(tid) = self
+            .discord
+            .find_active_thread_by_name(guild_id, forum_id, thread_name)
+            .await?
+        {
+            self.discord
+                .send_message_with_embed(tid, &title, &description, color, footer_text.as_deref())
+                .await?;
+        } else {
+            self.discord
+                .create_forum_thread_with_embed(
+                    forum_id,
+                    thread_name,
+                    &title,
+                    &description,
+                    color,
+                    footer_text.as_deref(),
+                )
+                .await?;
         }
+
         Ok(())
     }
 
-    async fn post_to_announcements(&self, event: &ParsedEvent, repo: &str) -> Result<()> {
-        let project = match projects::get_approved_project(&self.pool, repo).await? {
-            Some(p) => p,
-            None => return Ok(()),
-        };
-
+    async fn post_to_announcements(
+        &self,
+        event: &ParsedEvent,
+        project: &projects::Project,
+    ) -> Result<()> {
         if project.guild_id.is_empty() {
-            info!(repo, "project has no guild_id, cannot announce");
             return Ok(());
         }
 
+        let guild_id = Id::new(project.guild_id.parse::<u64>().unwrap_or(0));
         let config =
             match crate::governance::server_config::get_config(&self.pool, &project.guild_id)
                 .await?
             {
                 Some(c) => c,
-                None => {
-                    info!(
-                        guild_id = project.guild_id,
-                        "no server config found for guild"
-                    );
-                    return Ok(());
-                }
+                None => return Ok(()),
             };
 
-        let announce_channel = Id::new(config.announcements_id.parse::<u64>().unwrap_or(0));
+        // Self-healing for announcements channel
+        let announce_channel = match self
+            .discord
+            .find_channel_by_name(guild_id, "announcements")
+            .await?
+        {
+            Some(id) => {
+                // Sync if DB has wrong ID
+                if id.get().to_string() != config.announcements_id {
+                    crate::governance::server_config::save_config(
+                        &self.pool,
+                        &project.guild_id,
+                        &id.get().to_string(),
+                        &config.github_forum_id,
+                        config.mod_category_id.as_deref(),
+                        config.project_review_id.as_deref(),
+                        config.approvals_id.as_deref(),
+                    )
+                    .await?;
+                }
+                id
+            }
+            None => {
+                let id = self.discord.create_announcements_channel(guild_id).await?;
+                crate::governance::server_config::save_config(
+                    &self.pool,
+                    &project.guild_id,
+                    &id.get().to_string(),
+                    &config.github_forum_id,
+                    config.mod_category_id.as_deref(),
+                    config.project_review_id.as_deref(),
+                    config.approvals_id.as_deref(),
+                )
+                .await?;
+                id
+            }
+        };
 
         match event {
             ParsedEvent::Release(e) => {
@@ -429,8 +509,7 @@ impl Dispatcher {
                     .await?;
             }
             ParsedEvent::PullRequest(e) => {
-                let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
-                if has_bounty {
+                if e.pull_request.labels.iter().any(|l| l.name == "bounty") {
                     let verb = match e.action.as_str() {
                         "opened" => "Opened",
                         "labeled" => "Labeled",
@@ -451,8 +530,7 @@ impl Dispatcher {
                 }
             }
             ParsedEvent::Issue(e) => {
-                let has_bounty = e.issue.labels.iter().any(|l| l.name == "bounty");
-                if has_bounty {
+                if e.issue.labels.iter().any(|l| l.name == "bounty") {
                     let verb = if e.action == "labeled" {
                         "Labeled"
                     } else {

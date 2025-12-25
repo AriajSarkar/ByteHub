@@ -15,7 +15,8 @@ pub struct Project {
 }
 
 pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
-    let name = github_repo.split('/').last().unwrap_or(github_repo);
+    let github_repo = github_repo.to_lowercase();
+    let name = github_repo.split('/').last().unwrap_or(&github_repo);
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO projects (name, github_repo, forum_channel_id)
@@ -25,7 +26,7 @@ pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
         "#,
     )
     .bind(name)
-    .bind(github_repo)
+    .bind(&github_repo)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| Error::InvalidPayload("project already exists".into()))?;
@@ -34,11 +35,12 @@ pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
 }
 
 pub async fn approve_project(pool: &PgPool, github_repo: &str) -> Result<()> {
-    let rows = sqlx::query("UPDATE projects SET is_approved = true WHERE github_repo = $1")
-        .bind(github_repo)
-        .execute(pool)
-        .await?
-        .rows_affected();
+    let rows =
+        sqlx::query("UPDATE projects SET is_approved = true WHERE LOWER(github_repo) = LOWER($1)")
+            .bind(github_repo)
+            .execute(pool)
+            .await?
+            .rows_affected();
 
     if rows == 0 {
         return Err(Error::NotFound("project not found".into()));
@@ -54,7 +56,7 @@ pub async fn approve_project_with_forum(
 ) -> Result<()> {
     // Get project ID first
     let project_id: Option<uuid::Uuid> =
-        sqlx::query_scalar("SELECT id FROM projects WHERE github_repo = $1")
+        sqlx::query_scalar("SELECT id FROM projects WHERE LOWER(github_repo) = LOWER($1)")
             .bind(github_repo)
             .fetch_optional(pool)
             .await?;
@@ -63,7 +65,7 @@ pub async fn approve_project_with_forum(
 
     // Update project
     sqlx::query(
-        "UPDATE projects SET is_approved = true, forum_channel_id = $2, guild_id = $3 WHERE github_repo = $1",
+        "UPDATE projects SET is_approved = true, forum_channel_id = $2, guild_id = $3 WHERE LOWER(github_repo) = LOWER($1)",
     )
     .bind(github_repo)
     .bind(forum_channel_id)
@@ -111,7 +113,7 @@ pub async fn approve_project_with_forum(
 }
 
 pub async fn deny_project(pool: &PgPool, github_repo: &str) -> Result<()> {
-    sqlx::query("DELETE FROM projects WHERE github_repo = $1")
+    sqlx::query("DELETE FROM projects WHERE LOWER(github_repo) = LOWER($1)")
         .bind(github_repo)
         .execute(pool)
         .await?;
@@ -120,7 +122,7 @@ pub async fn deny_project(pool: &PgPool, github_repo: &str) -> Result<()> {
 
 pub async fn get_approved_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
     let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE github_repo = $1 AND is_approved = true",
+        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE LOWER(github_repo) = LOWER($1) AND is_approved = true",
     )
     .bind(github_repo)
     .fetch_optional(pool)
@@ -131,7 +133,7 @@ pub async fn get_approved_project(pool: &PgPool, github_repo: &str) -> Result<Op
 
 pub async fn get_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
     let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE github_repo = $1",
+        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE LOWER(github_repo) = LOWER($1)",
     )
     .bind(github_repo)
     .fetch_optional(pool)
@@ -150,9 +152,20 @@ pub async fn list_projects(pool: &PgPool) -> Result<Vec<Project>> {
     Ok(projects)
 }
 
-pub async fn update_thread_id(pool: &PgPool, github_repo: &str, thread_id: &str) -> Result<()> {
-    sqlx::query("UPDATE projects SET thread_id = $2 WHERE github_repo = $1")
-        .bind(github_repo)
+/// Update project's forum channel ID
+pub async fn update_forum_id(pool: &PgPool, repo: &str, forum_id: &str) -> Result<()> {
+    sqlx::query("UPDATE projects SET forum_channel_id = $1 WHERE LOWER(github_repo) = LOWER($2)")
+        .bind(forum_id)
+        .bind(repo)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Update project's activity thread ID
+pub async fn update_thread_id(pool: &PgPool, repo: &str, thread_id: &str) -> Result<()> {
+    sqlx::query("UPDATE projects SET thread_id = $2 WHERE LOWER(github_repo) = LOWER($1)")
+        .bind(repo)
         .bind(thread_id)
         .execute(pool)
         .await?;

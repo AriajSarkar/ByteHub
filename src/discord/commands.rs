@@ -208,32 +208,71 @@ async fn do_approve(
         ))?;
 
     // Parse GitHub category ID (stored in github_forum_id field)
-    let category_id: u64 = config
-        .github_forum_id
-        .parse()
-        .map_err(|_| Error::InvalidPayload("invalid category id".into()))?;
-    let github_category = twilight_model::id::Id::new(category_id);
+    let config_category_id = config.github_forum_id.clone();
+
+    // Find or create GitHub category (handles deleted/stale channels)
+    let github_category = match state.discord.find_channel_by_name(gid, "GitHub").await? {
+        Some(id) => {
+            // If the ID in config is different from found ID, update config
+            if id.get().to_string() != config_category_id {
+                server_config::save_config(
+                    &state.pool,
+                    guild_id_str,
+                    &config.announcements_id,
+                    &id.get().to_string(),
+                    config.mod_category_id.as_deref(),
+                    config.project_review_id.as_deref(),
+                    config.approvals_id.as_deref(),
+                )
+                .await?;
+            }
+            id
+        }
+        None => {
+            let id = state.discord.create_github_category(gid).await?;
+            server_config::save_config(
+                &state.pool,
+                guild_id_str,
+                &config.announcements_id,
+                &id.get().to_string(),
+                config.mod_category_id.as_deref(),
+                config.project_review_id.as_deref(),
+                config.approvals_id.as_deref(),
+            )
+            .await?;
+            id
+        }
+    };
 
     // Extract project name from repo (e.g., "AriajSarkar/eventix" -> "eventix")
     let project_name = repo.split('/').last().unwrap_or(repo);
 
-    // Check if project already has a forum channel
+    // Check if project already has a forum channel and if it still exists in Discord
+    let channels = state
+        .discord
+        .http
+        .guild_channels(gid)
+        .await
+        .map_err(|e| Error::Discord(e.to_string()))?
+        .model()
+        .await
+        .map_err(|e| Error::Discord(e.to_string()))?;
+
     let existing_project = projects::get_project(&state.pool, repo).await?;
     let (project_forum_id, is_new) = if let Some(p) = existing_project {
+        let mut found_id = None;
         if !p.forum_channel_id.is_empty() {
-            // Check if it's a valid ID
             if let Ok(id_u64) = p.forum_channel_id.parse::<u64>() {
-                (twilight_model::id::Id::new(id_u64), false)
-            } else {
-                // Fallback to creating new one if ID is invalid
-                (
-                    state
-                        .discord
-                        .create_project_forum(gid, github_category, project_name)
-                        .await?,
-                    true,
-                )
+                let id = twilight_model::id::Id::new(id_u64);
+                // Verify it exists in the channel list
+                if channels.iter().any(|c| c.id == id) {
+                    found_id = Some(id);
+                }
             }
+        }
+
+        if let Some(id) = found_id {
+            (id, false)
         } else {
             (
                 state

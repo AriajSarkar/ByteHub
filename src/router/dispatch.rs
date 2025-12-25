@@ -79,12 +79,14 @@ impl Dispatcher {
                 if self.is_bot_actor(e.sender.login.as_str()) {
                     return false;
                 }
-                // Only merged PRs
-                e.action == "closed" && e.pull_request.merged.unwrap_or(false)
+                // Post on opened, merged, or labeled (for bounty)
+                e.action == "opened"
+                    || (e.action == "closed" && e.pull_request.merged.unwrap_or(false))
+                    || e.action == "labeled"
             }
             ParsedEvent::Issue(e) => {
-                // Only handle new issues
-                e.action == "opened"
+                // Post on opened or labeled (for bounty)
+                e.action == "opened" || e.action == "labeled"
             }
             ParsedEvent::Release(e) => {
                 // Only handle published releases
@@ -188,11 +190,18 @@ impl Dispatcher {
                 let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
                 let color = if has_bounty { COLOR_BOUNTY } else { COLOR_PR };
                 let emoji = if has_bounty { "🪙" } else { "🧩" };
+                let action_text = match e.action.as_str() {
+                    "opened" => "opened",
+                    "labeled" => "labeled",
+                    "closed" if e.pull_request.merged.unwrap_or(false) => "merged",
+                    "closed" => "closed",
+                    _ => &e.action,
+                };
 
                 self.discord
                     .send_message_with_embed(
                         thread_id,
-                        &format!("{} PR #{} merged", emoji, e.pull_request.number),
+                        &format!("{} PR #{} {}", emoji, e.pull_request.number, action_text),
                         &format!(
                             "**{}**\nby @{}\n[View PR]({})",
                             e.pull_request.title, e.sender.login, e.pull_request.html_url
@@ -210,11 +219,17 @@ impl Dispatcher {
                     COLOR_ISSUE
                 };
                 let emoji = if has_bounty { "🪙" } else { "📋" };
+                let action_text = match e.action.as_str() {
+                    "opened" => "opened",
+                    "labeled" => "labeled",
+                    "closed" => "closed",
+                    _ => &e.action,
+                };
 
                 self.discord
                     .send_message_with_embed(
                         thread_id,
-                        &format!("{} Issue #{} opened", emoji, e.issue.number),
+                        &format!("{} Issue #{} {}", emoji, e.issue.number, action_text),
                         &format!(
                             "**{}**\nby @{}\n[View Issue]({})",
                             e.issue.title, e.sender.login, e.issue.html_url
@@ -287,14 +302,21 @@ impl Dispatcher {
                 let color = if has_bounty { COLOR_BOUNTY } else { COLOR_PR };
                 let thread_name = if has_bounty {
                     "🪙 PR with bounty"
+                } else if e.action == "opened" {
+                    "🧩 PR Opened"
                 } else {
                     "🧩 PR Merged"
                 };
 
                 let title = e.pull_request.title.clone();
+                let action_verb = if e.action == "opened" {
+                    "Opened"
+                } else {
+                    "Merged"
+                };
                 let description = format!(
-                    "Merged by @{}\n[View PR]({})",
-                    e.sender.login, e.pull_request.html_url
+                    "{} by @{}\n[View PR]({})",
+                    action_verb, e.sender.login, e.pull_request.html_url
                 );
 
                 self.discord
@@ -364,9 +386,95 @@ impl Dispatcher {
     }
 
     async fn post_to_announcements(&self, event: &ParsedEvent, repo: &str) -> Result<()> {
-        // TODO: Implement actual announcement posting
-        // Would need to get announcements channel from server_config
-        info!(repo, "would post to announcements");
+        let project = match projects::get_approved_project(&self.pool, repo).await? {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        if project.guild_id.is_empty() {
+            info!(repo, "project has no guild_id, cannot announce");
+            return Ok(());
+        }
+
+        let config =
+            match crate::governance::server_config::get_config(&self.pool, &project.guild_id)
+                .await?
+            {
+                Some(c) => c,
+                None => {
+                    info!(
+                        guild_id = project.guild_id,
+                        "no server config found for guild"
+                    );
+                    return Ok(());
+                }
+            };
+
+        let announce_channel = Id::new(config.announcements_id.parse::<u64>().unwrap_or(0));
+
+        match event {
+            ParsedEvent::Release(e) => {
+                self.discord
+                    .send_message_with_embed(
+                        announce_channel,
+                        &format!("🚀 New Release: {}", e.release.tag_name),
+                        &format!(
+                            "{}\n\n[View Release]({})",
+                            e.release.body.as_deref().unwrap_or(""),
+                            e.release.html_url
+                        ),
+                        COLOR_SUCCESS,
+                        Some(&format!("Project: {}", project.name)),
+                    )
+                    .await?;
+            }
+            ParsedEvent::PullRequest(e) => {
+                let has_bounty = e.pull_request.labels.iter().any(|l| l.name == "bounty");
+                if has_bounty {
+                    let verb = match e.action.as_str() {
+                        "opened" => "Opened",
+                        "labeled" => "Labeled",
+                        _ => "Merged",
+                    };
+                    self.discord
+                        .send_message_with_embed(
+                            announce_channel,
+                            &format!("🪙 Bounty PR {}: #{}", verb, e.pull_request.number),
+                            &format!(
+                                "**{}**\nby @{}\n[View PR]({})",
+                                e.pull_request.title, e.sender.login, e.pull_request.html_url
+                            ),
+                            COLOR_BOUNTY,
+                            Some(&format!("Project: {}", project.name)),
+                        )
+                        .await?;
+                }
+            }
+            ParsedEvent::Issue(e) => {
+                let has_bounty = e.issue.labels.iter().any(|l| l.name == "bounty");
+                if has_bounty {
+                    let verb = if e.action == "labeled" {
+                        "Labeled"
+                    } else {
+                        "Opened"
+                    };
+                    self.discord
+                        .send_message_with_embed(
+                            announce_channel,
+                            &format!("🪙 Bounty Issue {}: #{}", verb, e.issue.number),
+                            &format!(
+                                "**{}**\nby @{}\n[View Issue]({})",
+                                e.issue.title, e.sender.login, e.issue.html_url
+                            ),
+                            COLOR_BOUNTY,
+                            Some(&format!("Project: {}", project.name)),
+                        )
+                        .await?;
+                }
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 }

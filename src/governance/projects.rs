@@ -10,6 +10,7 @@ pub struct Project {
     pub github_repo: String,
     pub forum_channel_id: String,
     pub thread_id: Option<String>,
+    pub guild_id: String,
     pub is_approved: bool,
 }
 
@@ -49,6 +50,7 @@ pub async fn approve_project_with_forum(
     pool: &PgPool,
     github_repo: &str,
     forum_channel_id: &str,
+    guild_id: &str,
 ) -> Result<()> {
     // Get project ID first
     let project_id: Option<uuid::Uuid> =
@@ -61,10 +63,11 @@ pub async fn approve_project_with_forum(
 
     // Update project
     sqlx::query(
-        "UPDATE projects SET is_approved = true, forum_channel_id = $2 WHERE github_repo = $1",
+        "UPDATE projects SET is_approved = true, forum_channel_id = $2, guild_id = $3 WHERE github_repo = $1",
     )
     .bind(github_repo)
     .bind(forum_channel_id)
+    .bind(guild_id)
     .execute(pool)
     .await?;
 
@@ -117,7 +120,7 @@ pub async fn deny_project(pool: &PgPool, github_repo: &str) -> Result<()> {
 
 pub async fn get_approved_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
     let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, is_approved FROM projects WHERE github_repo = $1 AND is_approved = true"
+        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE github_repo = $1 AND is_approved = true",
     )
     .bind(github_repo)
     .fetch_optional(pool)

@@ -224,8 +224,13 @@ async fn do_approve(
         .await?;
 
     // Update project with the forum channel ID and approve
-    projects::approve_project_with_forum(&state.pool, repo, &project_forum_id.get().to_string())
-        .await?;
+    projects::approve_project_with_forum(
+        &state.pool,
+        repo,
+        &project_forum_id.get().to_string(),
+        guild_id_str,
+    )
+    .await?;
 
     Ok(format!(
         "✅ Project `{}` approved!\n\nCreated forum: <#{}>",

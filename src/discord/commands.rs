@@ -217,11 +217,41 @@ async fn do_approve(
     // Extract project name from repo (e.g., "AriajSarkar/eventix" -> "eventix")
     let project_name = repo.split('/').last().unwrap_or(repo);
 
-    // Create a forum channel for this project inside the GitHub category
-    let project_forum_id = state
-        .discord
-        .create_project_forum(gid, github_category, project_name)
-        .await?;
+    // Check if project already has a forum channel
+    let existing_project = projects::get_project(&state.pool, repo).await?;
+    let (project_forum_id, is_new) = if let Some(p) = existing_project {
+        if !p.forum_channel_id.is_empty() {
+            // Check if it's a valid ID
+            if let Ok(id_u64) = p.forum_channel_id.parse::<u64>() {
+                (twilight_model::id::Id::new(id_u64), false)
+            } else {
+                // Fallback to creating new one if ID is invalid
+                (
+                    state
+                        .discord
+                        .create_project_forum(gid, github_category, project_name)
+                        .await?,
+                    true,
+                )
+            }
+        } else {
+            (
+                state
+                    .discord
+                    .create_project_forum(gid, github_category, project_name)
+                    .await?,
+                true,
+            )
+        }
+    } else {
+        (
+            state
+                .discord
+                .create_project_forum(gid, github_category, project_name)
+                .await?,
+            true,
+        )
+    };
 
     // Update project with the forum channel ID and approve
     projects::approve_project_with_forum(
@@ -232,10 +262,13 @@ async fn do_approve(
     )
     .await?;
 
-    Ok(format!(
-        "✅ Project `{}` approved!\n\nCreated forum: <#{}>",
-        repo, project_forum_id
-    ))
+    let action_msg = if is_new {
+        format!("Created forum: <#{}>", project_forum_id)
+    } else {
+        format!("Reusing existing forum: <#{}>", project_forum_id)
+    };
+
+    Ok(format!("✅ Project `{}` approved!\n\n{}", repo, action_msg))
 }
 
 async fn handle_deny(

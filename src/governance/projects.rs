@@ -129,9 +129,20 @@ pub async fn get_approved_project(pool: &PgPool, github_repo: &str) -> Result<Op
     Ok(project)
 }
 
+pub async fn get_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
+    let project = sqlx::query_as::<_, Project>(
+        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE github_repo = $1",
+    )
+    .bind(github_repo)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(project)
+}
+
 pub async fn list_projects(pool: &PgPool) -> Result<Vec<Project>> {
     let projects = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, is_approved FROM projects ORDER BY is_approved DESC, name ASC"
+        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects ORDER BY is_approved DESC, name ASC"
     )
     .fetch_all(pool)
     .await?;

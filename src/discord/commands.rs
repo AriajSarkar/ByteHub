@@ -267,7 +267,7 @@ pub async fn do_approve(
     };
 
     // Extract project name from repo (e.g., "AriajSarkar/eventix" -> "eventix")
-    let project_name = repo.split('/').last().unwrap_or(repo);
+    let project_name = repo.rsplit('/').next().unwrap_or(repo);
 
     // Check if project already has a forum channel and if it still exists in Discord
     let channels = state.discord.guild_channels(gid).await?;

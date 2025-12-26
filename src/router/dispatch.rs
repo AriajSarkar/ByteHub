@@ -154,7 +154,7 @@ impl Dispatcher {
             None => self.discord.create_github_category(guild_id).await?,
         };
 
-        let project_name = repo.split('/').last().unwrap_or(repo);
+        let project_name = repo.rsplit('/').next().unwrap_or(repo);
         let new_forum_id = self
             .discord
             .create_project_forum(guild_id, category_id, project_name)
@@ -173,7 +173,7 @@ impl Dispatcher {
         forum_id: Id<twilight_model::id::marker::ChannelMarker>,
         guild_id: Id<twilight_model::id::marker::GuildMarker>,
     ) -> Result<String> {
-        let project_name = repo.split('/').last().unwrap_or(repo);
+        let project_name = repo.rsplit('/').next().unwrap_or(repo);
         let thread_name = format!("📦 {} Activity", project_name);
 
         // If thread ID exists in DB, verify it still exists in Discord

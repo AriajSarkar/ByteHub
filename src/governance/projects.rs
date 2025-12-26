@@ -16,7 +16,7 @@ pub struct Project {
 
 pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
     let github_repo = github_repo.to_lowercase();
-    let name = github_repo.split('/').last().unwrap_or(&github_repo);
+    let name = github_repo.rsplit('/').next().unwrap_or(&github_repo);
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO projects (name, github_repo, forum_channel_id)
@@ -74,7 +74,7 @@ pub async fn approve_project_with_forum(
     .await?;
 
     // Create default rules for this project (catch-all for all event types)
-    let default_rules = vec![
+    let default_rules = [
         // Workflow runs - post all
         (
             r#"{"event_type": "workflow_run.completed"}"#,

@@ -40,7 +40,7 @@ pub fn format_pr_merged(event: &crate::github::events::PullRequestEvent) -> (Str
 
 pub fn format_issue(event: &crate::github::events::IssueEvent) -> (String, String) {
     let labels: Vec<&str> = event.issue.labels.iter().map(|l| l.name.as_str()).collect();
-    let has_bounty = labels.iter().any(|l| *l == "bounty");
+    let has_bounty = labels.contains(&"bounty");
     let emoji = if has_bounty { "🪙" } else { "📋" };
     let title = format!(
         "{} Issue #{}: {}",

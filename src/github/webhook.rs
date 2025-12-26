@@ -6,10 +6,10 @@ use axum::{
 };
 use tracing::{info, warn};
 
-use crate::AppState;
 use crate::error::{Error, Result};
 use crate::github::{events::ParsedEvent, verify::verify_github_signature};
 use crate::router::dispatch::Dispatcher;
+use crate::AppState;
 
 pub async fn handle_webhook(
     State(state): State<AppState>,

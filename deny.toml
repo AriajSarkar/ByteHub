@@ -4,6 +4,8 @@ vulnerability = "deny"
 unmaintained = "warn"
 yanked = "warn"
 notice = "warn"
+# rsa is a stale lockfile entry from sqlx-mysql (not used, we only use postgres)
+ignore = ["RUSTSEC-2023-0071"]
 
 [licenses]
 unlicensed = "deny"

@@ -1,5 +1,9 @@
 # Contributing to ByteHub
 
+> ⚠️ **IMPORTANT: By contributing to this project, you agree to the [Contributor License Agreement](LICENSE.md#8-contributor-license-agreement).**
+>
+> Opening a pull request means you accept that your contributions become the property of the project maintainer with no claims to royalties or ownership.
+
 Welcome! This guide outlines how to contribute to ByteHub while maintaining our high standards for reliability and testing.
 
 ## Tech Stack

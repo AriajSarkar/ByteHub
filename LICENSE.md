@@ -207,6 +207,16 @@ Copyright © 2025 Raj Sarkar (a.k.a. Ariaj Sarkar). All Rights Reserved.
 
 13.2. Subject to Section 12 (Dispute Resolution), the courts of Kolkata, West Bengal, India shall have exclusive jurisdiction over any matters not subject to arbitration.
 
+13.3. **International Application.** This License applies worldwide. The Licensor's copyright in the Work is protected internationally under:
+
+   (a) The Berne Convention for the Protection of Literary and Artistic Works;
+   
+   (b) The Agreement on Trade-Related Aspects of Intellectual Property Rights (TRIPS);
+   
+   (c) The WIPO Copyright Treaty (WCT).
+
+Users in any country that is a signatory to the above treaties are bound by this License and subject to the copyright protections afforded thereunder.
+
 ---
 
 ### 14. ENTIRE AGREEMENT

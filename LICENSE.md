@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: LicenseRef-ByteHub-Source-Available -->
+
 # BYTEHUB SOURCE AVAILABLE LICENSE
 
 Version 1.0, December 27, 2025

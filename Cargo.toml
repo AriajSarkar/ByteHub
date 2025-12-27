@@ -14,9 +14,9 @@ convex = "0.10"
 maplit = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-twilight-http = "0.16"
-twilight-model = "0.16"
-twilight-util = "0.16"
+twilight-http = "0.17"
+twilight-model = "0.17"
+twilight-util = "0.17"
 octocrab = "0.44"
 crabgraph = "0.3"
 tracing = "0.1"

@@ -434,6 +434,9 @@ impl DiscordInterface for DiscordClient {
     }
 
     async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
+        use twilight_model::channel::ChannelFlags;
+
+        // Lock the thread
         self.http
             .update_thread(thread_id)
             .archived(false)
@@ -441,13 +444,12 @@ impl DiscordInterface for DiscordClient {
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        let url = format!("https://discord.com/api/v10/channels/{}", thread_id);
-        let _ = reqwest::Client::new()
-            .patch(&url)
-            .header("Authorization", format!("Bot {}", self.token))
-            .json(&serde_json::json!({ "flags": 2 }))
-            .send()
-            .await;
+        // Pin the thread using update_channel (which has the flags method in 0.17)
+        self.http
+            .update_channel(thread_id)
+            .flags(ChannelFlags::PINNED)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
 
         Ok(())
     }

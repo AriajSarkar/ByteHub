@@ -13,13 +13,8 @@ allow = [
     "ISC",
     "MPL-2.0",
     "Unicode-3.0",
+    "LicenseRef-ByteHub-Source-Available",
 ]
-
-# Skip our own crate (uses custom Source Available license)
-[[licenses.clarify]]
-name = "bytehub"
-expression = "LicenseRef-ByteHub"
-license-files = [{ path = "LICENSE.md", hash = 0x36c6032d }]
 
 [bans]
 multiple-versions = "warn"

@@ -1,8 +1,11 @@
-use sqlx::PgPool;
+use convex::Value as ConvexValue;
+use maplit::btreemap;
+use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::storage::convex::ConvexDb;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub guild_id: String,
     pub announcements_id: String,
@@ -13,18 +16,29 @@ pub struct ServerConfig {
 }
 
 /// Get server config by guild ID
-pub async fn get_config(pool: &PgPool, guild_id: &str) -> Result<Option<ServerConfig>> {
-    let config =
-        sqlx::query_as::<_, ServerConfig>("SELECT * FROM server_config WHERE guild_id = $1")
-            .bind(guild_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(config)
+pub async fn get_config(db: &ConvexDb, guild_id: &str) -> Result<Option<ServerConfig>> {
+    let result = db
+        .query(
+            "serverConfig:get",
+            btreemap! {
+                "guild_id".into() => ConvexValue::String(guild_id.to_string()),
+            },
+        )
+        .await?;
+
+    if result.is_null() {
+        return Ok(None);
+    }
+
+    let config: ServerConfig = serde_json::from_value(result)
+        .map_err(|e| Error::InvalidPayload(format!("Failed to parse config: {}", e)))?;
+
+    Ok(Some(config))
 }
 
 /// Save server config
 pub async fn save_config(
-    pool: &PgPool,
+    db: &ConvexDb,
     guild_id: &str,
     announcements_id: &str,
     github_forum_id: &str,
@@ -32,25 +46,18 @@ pub async fn save_config(
     project_review_id: Option<&str>,
     approvals_id: Option<&str>,
 ) -> Result<()> {
-    sqlx::query(
-        r#"
-        INSERT INTO server_config (guild_id, announcements_id, github_forum_id, mod_category_id, project_review_id, approvals_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (guild_id) DO UPDATE SET
-            announcements_id = EXCLUDED.announcements_id,
-            github_forum_id = EXCLUDED.github_forum_id,
-            mod_category_id = EXCLUDED.mod_category_id,
-            project_review_id = EXCLUDED.project_review_id,
-            approvals_id = EXCLUDED.approvals_id
-        "#
+    db.mutation(
+        "serverConfig:save",
+        btreemap! {
+            "guild_id".into() => ConvexValue::String(guild_id.to_string()),
+            "announcements_id".into() => ConvexValue::String(announcements_id.to_string()),
+            "github_forum_id".into() => ConvexValue::String(github_forum_id.to_string()),
+            "mod_category_id".into() => mod_category_id.map(|s| ConvexValue::String(s.to_string())).unwrap_or(ConvexValue::Null),
+            "project_review_id".into() => project_review_id.map(|s| ConvexValue::String(s.to_string())).unwrap_or(ConvexValue::Null),
+            "approvals_id".into() => approvals_id.map(|s| ConvexValue::String(s.to_string())).unwrap_or(ConvexValue::Null),
+        },
     )
-    .bind(guild_id)
-    .bind(announcements_id)
-    .bind(github_forum_id)
-    .bind(mod_category_id)
-    .bind(project_review_id)
-    .bind(approvals_id)
-    .execute(pool)
     .await?;
+
     Ok(())
 }

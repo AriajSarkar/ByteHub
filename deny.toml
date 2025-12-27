@@ -1,12 +1,10 @@
 # cargo-deny configuration
-# Updated to new format (see https://github.com/EmbarkStudios/cargo-deny/pull/611)
 
 [advisories]
 db-path = "~/.cargo/advisory-db"
 ignore = []
 
 [licenses]
-# Allow standard licenses and our custom Source Available license
 allow = [
     "MIT",
     "Apache-2.0",
@@ -17,13 +15,11 @@ allow = [
     "Unicode-3.0",
 ]
 
-# Allow our own workspace crate (uses custom Source Available license)
-exceptions = [
-    { name = "bytehub", allow = ["LicenseRef-Source-Available"] },
-]
-
-# Don't fail on workspace crates with custom licenses
-private = { ignore = true }
+# Skip our own crate (uses custom Source Available license)
+[[licenses.clarify]]
+name = "bytehub"
+expression = "LicenseRef-ByteHub"
+license-files = [{ path = "LICENSE.md", hash = 0x36c6032d }]
 
 [bans]
 multiple-versions = "warn"

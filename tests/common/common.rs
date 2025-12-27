@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 use bytehub::error::Result;
+use bytehub::storage::convex::ConvexDb;
+use std::sync::Arc;
 use twilight_model::guild::Permissions;
 use twilight_model::id::{
     marker::{ChannelMarker, GuildMarker},
@@ -11,6 +13,7 @@ use twilight_model::id::marker::ApplicationMarker;
 
 pub struct MockDiscord {
     pub permissions: Permissions,
+    #[allow(dead_code)]
     pub fail_all: bool,
 }
 
@@ -19,16 +22,25 @@ fn init_env() {
     dotenvy::dotenv().ok();
 }
 
-/// Create a test AppState with MockDiscord (handles env init internally)
-pub fn create_state(pool: sqlx::PgPool, permissions: Permissions) -> bytehub::AppState {
+/// Create a test AppState with MockDiscord
+/// Note: For tests that need database access, you'll need a real Convex dev connection
+pub async fn create_state(permissions: Permissions) -> bytehub::AppState {
     init_env();
-    let discord = std::sync::Arc::new(MockDiscord {
+    let discord = Arc::new(MockDiscord {
         permissions,
         fail_all: false,
     });
+
+    // Create a real ConvexDb connection for testing
+    // This requires CONVEX_URL to be set in the environment
+    let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
+    let db = ConvexDb::new(&convex_url)
+        .await
+        .expect("Failed to connect to Convex for tests");
+
     bytehub::AppState {
         config: bytehub::config::Config::from_env(),
-        pool,
+        db,
         discord,
     }
 }

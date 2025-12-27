@@ -1,13 +1,22 @@
 use bytehub::discord::client::DiscordClient;
 use bytehub::github::events::{ParsedEvent, Repository, User, WorkflowRun, WorkflowRunEvent};
 use bytehub::router::dispatch::Dispatcher;
-use sqlx::PgPool;
+use bytehub::storage::convex::ConvexDb;
 use std::sync::Arc;
 
-#[sqlx::test]
-async fn test_workflow_success_triage(pool: PgPool) {
+async fn create_test_dispatcher() -> Dispatcher {
+    dotenvy::dotenv().ok();
+    let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
+    let db = ConvexDb::new(&convex_url)
+        .await
+        .expect("Failed to connect to Convex");
     let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+    Dispatcher::new(db, discord)
+}
+
+#[tokio::test]
+async fn test_workflow_success_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::WorkflowRun(WorkflowRunEvent {
         action: "completed".into(),
@@ -32,10 +41,9 @@ async fn test_workflow_success_triage(pool: PgPool) {
     assert!(dispatcher.should_post(&event));
 }
 
-#[sqlx::test]
-async fn test_workflow_failure_triage(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_workflow_failure_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::WorkflowRun(WorkflowRunEvent {
         action: "completed".into(),
@@ -60,10 +68,9 @@ async fn test_workflow_failure_triage(pool: PgPool) {
     assert!(dispatcher.should_post(&event));
 }
 
-#[sqlx::test]
-async fn test_workflow_in_progress_ignored(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_workflow_in_progress_ignored() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::WorkflowRun(WorkflowRunEvent {
         action: "requested".into(),
@@ -88,10 +95,9 @@ async fn test_workflow_in_progress_ignored(pool: PgPool) {
     assert!(!dispatcher.should_post(&event));
 }
 
-#[sqlx::test]
-async fn test_workflow_feature_branch_ignored(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_workflow_feature_branch_ignored() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::WorkflowRun(WorkflowRunEvent {
         action: "completed".into(),

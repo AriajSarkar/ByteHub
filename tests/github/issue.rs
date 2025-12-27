@@ -1,13 +1,22 @@
 use bytehub::discord::client::DiscordClient;
 use bytehub::github::events::{Issue, IssueEvent, Label, ParsedEvent, Repository, User};
 use bytehub::router::dispatch::Dispatcher;
-use sqlx::PgPool;
+use bytehub::storage::convex::ConvexDb;
 use std::sync::Arc;
 
-#[sqlx::test]
-async fn test_issue_opened_triage(pool: PgPool) {
+async fn create_test_dispatcher() -> Dispatcher {
+    dotenvy::dotenv().ok();
+    let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
+    let db = ConvexDb::new(&convex_url)
+        .await
+        .expect("Failed to connect to Convex");
     let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+    Dispatcher::new(db, discord)
+}
+
+#[tokio::test]
+async fn test_issue_opened_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::Issue(IssueEvent {
         action: "opened".into(),
@@ -32,10 +41,9 @@ async fn test_issue_opened_triage(pool: PgPool) {
     assert!(!dispatcher.should_announce(&event));
 }
 
-#[sqlx::test]
-async fn test_issue_with_bounty_announcement(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_issue_with_bounty_announcement() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::Issue(IssueEvent {
         action: "opened".into(),
@@ -60,10 +68,9 @@ async fn test_issue_with_bounty_announcement(pool: PgPool) {
     assert!(dispatcher.should_announce(&event));
 }
 
-#[sqlx::test]
-async fn test_issue_labeled_triage(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_issue_labeled_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::Issue(IssueEvent {
         action: "labeled".into(),

@@ -3,13 +3,22 @@ use bytehub::github::events::{
     Label, ParsedEvent, PullRequest, PullRequestEvent, Repository, User,
 };
 use bytehub::router::dispatch::Dispatcher;
-use sqlx::PgPool;
+use bytehub::storage::convex::ConvexDb;
 use std::sync::Arc;
 
-#[sqlx::test]
-async fn test_pr_opened_triage(pool: PgPool) {
+async fn create_test_dispatcher() -> Dispatcher {
+    dotenvy::dotenv().ok();
+    let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
+    let db = ConvexDb::new(&convex_url)
+        .await
+        .expect("Failed to connect to Convex");
     let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+    Dispatcher::new(db, discord)
+}
+
+#[tokio::test]
+async fn test_pr_opened_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::PullRequest(PullRequestEvent {
         action: "opened".into(),
@@ -35,10 +44,9 @@ async fn test_pr_opened_triage(pool: PgPool) {
     assert!(!dispatcher.should_announce(&event));
 }
 
-#[sqlx::test]
-async fn test_pr_merged_triage(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_pr_merged_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::PullRequest(PullRequestEvent {
         action: "closed".into(),
@@ -63,10 +71,9 @@ async fn test_pr_merged_triage(pool: PgPool) {
     assert!(dispatcher.should_post(&event));
 }
 
-#[sqlx::test]
-async fn test_pr_with_bounty_announcement(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_pr_with_bounty_announcement() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::PullRequest(PullRequestEvent {
         action: "opened".into(),
@@ -92,10 +99,9 @@ async fn test_pr_with_bounty_announcement(pool: PgPool) {
     assert!(dispatcher.should_announce(&event));
 }
 
-#[sqlx::test]
-async fn test_bot_actor_exclusion(pool: PgPool) {
-    let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+#[tokio::test]
+async fn test_bot_actor_exclusion() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::PullRequest(PullRequestEvent {
         action: "opened".into(),

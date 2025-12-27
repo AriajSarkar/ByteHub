@@ -1,13 +1,22 @@
 use bytehub::discord::client::DiscordClient;
 use bytehub::github::events::{ParsedEvent, Release, ReleaseEvent, Repository, User};
 use bytehub::router::dispatch::Dispatcher;
-use sqlx::PgPool;
+use bytehub::storage::convex::ConvexDb;
 use std::sync::Arc;
 
-#[sqlx::test]
-async fn test_release_published_triage(pool: PgPool) {
+async fn create_test_dispatcher() -> Dispatcher {
+    dotenvy::dotenv().ok();
+    let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
+    let db = ConvexDb::new(&convex_url)
+        .await
+        .expect("Failed to connect to Convex");
     let discord = Arc::new(DiscordClient::new("token", 123));
-    let dispatcher = Dispatcher::new(pool, discord);
+    Dispatcher::new(db, discord)
+}
+
+#[tokio::test]
+async fn test_release_published_triage() {
+    let dispatcher = create_test_dispatcher().await;
 
     let event = ParsedEvent::Release(ReleaseEvent {
         action: "published".into(),

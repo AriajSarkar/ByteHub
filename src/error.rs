@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(String),
     #[error("invalid signature")]
     InvalidSignature,
     #[error("invalid payload: {0}")]

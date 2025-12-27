@@ -10,11 +10,11 @@ use crate::config::Config;
 use crate::discord::client::DiscordInterface;
 use crate::discord::commands::handle_interaction;
 use crate::github::webhook::handle_webhook;
+use crate::storage::convex::ConvexDb;
 use axum::{
     routing::{get, post},
     Json, Router,
 };
-use sqlx::PgPool;
 use std::sync::Arc;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,7 +22,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    pub pool: PgPool,
+    pub db: ConvexDb,
     pub discord: Arc<dyn DiscordInterface>,
 }
 
@@ -46,7 +46,7 @@ pub async fn debug_env(State(state): State<AppState>) -> Json<serde_json::Value>
         "discord_public_key_prefix": &state.config.discord_public_key[..8.min(state.config.discord_public_key.len())],
         "discord_application_id": state.config.discord_application_id,
         "discord_bot_token_len": state.config.discord_bot_token.len(),
-        "database_url_set": !state.config.database_url.is_empty(),
+        "convex_url_set": !state.config.convex_url.is_empty(),
         "github_webhook_secret_set": !state.config.github_webhook_secret.is_empty(),
     }))
 }

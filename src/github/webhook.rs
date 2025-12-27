@@ -39,7 +39,7 @@ pub async fn handle_webhook(
         return Ok(StatusCode::OK);
     }
 
-    let dispatcher = Dispatcher::new(state.pool.clone(), state.discord.clone());
+    let dispatcher = Dispatcher::new(state.db.clone(), state.discord.clone());
     dispatcher.dispatch(event).await?;
 
     Ok(StatusCode::OK)

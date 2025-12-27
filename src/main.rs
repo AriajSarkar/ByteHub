@@ -1,6 +1,7 @@
 use bytehub::config::Config;
 use bytehub::discord::client::DiscordClient;
-use bytehub::{create_app, storage, AppState};
+use bytehub::storage::convex::ConvexDb;
+use bytehub::{create_app, AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -25,6 +26,7 @@ fn print_banner(addr: &SocketAddr) {
         addr.port()
     );
     println!("  \x1b[32m→\x1b[0m Version: \x1b[33m{}\x1b[0m", VERSION);
+    println!("  \x1b[32m→\x1b[0m Database: \x1b[34mConvex\x1b[0m");
     println!();
     println!("  \x1b[90mEndpoints:\x1b[0m");
     println!("    \x1b[32mGET \x1b[0m /                  \x1b[90m← Health check\x1b[0m");
@@ -45,12 +47,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env();
-    let pool = storage::db::create_pool(&config.database_url).await?;
+    let db = ConvexDb::new(&config.convex_url).await?;
     let discord = DiscordClient::new(&config.discord_bot_token, config.discord_application_id);
 
     let state = AppState {
         config: config.clone(),
-        pool,
+        db,
         discord: Arc::new(discord),
     };
 

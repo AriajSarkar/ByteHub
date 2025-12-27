@@ -1,11 +1,11 @@
 use axum::{body::Bytes, extract::State, http::HeaderMap, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use tracing::warn;
 
 use crate::discord::verify::verify_discord_signature;
 use crate::error::{Error, Result};
 use crate::governance::{projects, server_config, whitelist};
+use crate::storage::convex::ConvexDb;
 use crate::AppState;
 
 use twilight_model::guild::Permissions;
@@ -144,10 +144,10 @@ pub async fn handle_interaction(
         }
 
         let response = match data.name.as_str() {
-            "submit-project" => handle_submit_project(&state.pool, data).await?,
-            "deny" => handle_deny(&state.pool, member, data).await?,
-            "whitelist-user" => handle_whitelist(&state.pool, member, data).await?,
-            "list" => handle_list(&state.pool, member).await?,
+            "submit-project" => handle_submit_project(&state.db, data).await?,
+            "deny" => handle_deny(&state.db, member, data).await?,
+            "whitelist-user" => handle_whitelist(&state.db, member, data).await?,
+            "list" => handle_list(&state.db, member).await?,
             _ => "Unknown command".to_string(),
         };
 
@@ -166,7 +166,7 @@ pub async fn handle_interaction(
     }))
 }
 
-async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<String> {
+async fn handle_submit_project(db: &ConvexDb, data: &InteractionData) -> Result<String> {
     let opts = data
         .options
         .as_ref()
@@ -177,7 +177,7 @@ async fn handle_submit_project(pool: &PgPool, data: &InteractionData) -> Result<
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
-    projects::submit_project(pool, repo).await?;
+    projects::submit_project(db, repo).await?;
     Ok(format!("Project `{}` submitted for approval.", repo))
 }
 
@@ -223,7 +223,7 @@ pub async fn do_approve(
     }
 
     // Get server config to find the GitHub category
-    let config = server_config::get_config(&state.pool, guild_id_str)
+    let config = server_config::get_config(&state.db, guild_id_str)
         .await?
         .ok_or(Error::InvalidPayload(
             "Server not set up. Run /setup-server first.".into(),
@@ -238,7 +238,7 @@ pub async fn do_approve(
             // If the ID in config is different from found ID, update config
             if id.get().to_string() != config_category_id {
                 server_config::save_config(
-                    &state.pool,
+                    &state.db,
                     guild_id_str,
                     &config.announcements_id,
                     &id.get().to_string(),
@@ -253,7 +253,7 @@ pub async fn do_approve(
         None => {
             let id = state.discord.create_github_category(gid).await?;
             server_config::save_config(
-                &state.pool,
+                &state.db,
                 guild_id_str,
                 &config.announcements_id,
                 &id.get().to_string(),
@@ -272,7 +272,7 @@ pub async fn do_approve(
     // Check if project already has a forum channel and if it still exists in Discord
     let channels = state.discord.guild_channels(gid).await?;
 
-    let existing_project = projects::get_project(&state.pool, repo).await?;
+    let existing_project = projects::get_project(&state.db, repo).await?;
 
     if let Some(p) = &existing_project {
         if p.is_approved {
@@ -315,7 +315,7 @@ pub async fn do_approve(
 
     // Update project with the forum channel ID and approve
     projects::approve_project_with_forum(
-        &state.pool,
+        &state.db,
         repo,
         &project_forum_id.get().to_string(),
         guild_id_str,
@@ -332,7 +332,7 @@ pub async fn do_approve(
 }
 
 async fn handle_deny(
-    pool: &PgPool,
+    db: &ConvexDb,
     member: Option<&Member>,
     data: &InteractionData,
 ) -> Result<String> {
@@ -347,12 +347,12 @@ async fn handle_deny(
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
-    projects::deny_project(pool, repo).await?;
+    projects::deny_project(db, repo).await?;
     Ok(format!("Project `{}` denied and removed.", repo))
 }
 
 async fn handle_whitelist(
-    pool: &PgPool,
+    db: &ConvexDb,
     member: Option<&Member>,
     data: &InteractionData,
 ) -> Result<String> {
@@ -367,7 +367,7 @@ async fn handle_whitelist(
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing username".into()))?;
 
-    whitelist::add_user(pool, username).await?;
+    whitelist::add_user(db, username).await?;
     Ok(format!("User `{}` added to whitelist.", username))
 }
 
@@ -392,10 +392,10 @@ fn check_moderator(member: Option<&Member>) -> Result<()> {
     Err(Error::Unauthorized)
 }
 
-async fn handle_list(pool: &PgPool, member: Option<&Member>) -> Result<String> {
+async fn handle_list(db: &ConvexDb, member: Option<&Member>) -> Result<String> {
     check_moderator(member)?;
 
-    let projects_list = projects::list_projects(pool).await?;
+    let projects_list = projects::list_projects(db).await?;
 
     if projects_list.is_empty() {
         return Ok("No projects registered.".to_string());
@@ -509,7 +509,7 @@ pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Res
 
     // Save config to database
     server_config::save_config(
-        &state.pool,
+        &state.db,
         guild_id_str,
         &announcements_id.get().to_string(),
         &github_category_id.get().to_string(),

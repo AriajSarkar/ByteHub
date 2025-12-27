@@ -1,4 +1,3 @@
-use sqlx::PgPool;
 use tracing::info;
 use twilight_model::id::Id;
 
@@ -9,16 +8,17 @@ use crate::discord::formatters::{
 use crate::error::Result;
 use crate::github::events::ParsedEvent;
 use crate::governance::projects;
+use crate::storage::convex::ConvexDb;
 use std::sync::Arc;
 
 pub struct Dispatcher {
-    pool: PgPool,
+    db: ConvexDb,
     discord: Arc<dyn DiscordInterface>,
 }
 
 impl Dispatcher {
-    pub fn new(pool: PgPool, discord: Arc<dyn DiscordInterface>) -> Self {
-        Self { pool, discord }
+    pub fn new(db: ConvexDb, discord: Arc<dyn DiscordInterface>) -> Self {
+        Self { db, discord }
     }
 
     pub async fn dispatch(&self, event: ParsedEvent) -> Result<()> {
@@ -27,7 +27,7 @@ impl Dispatcher {
             None => return Ok(()),
         };
 
-        let project = match projects::get_approved_project(&self.pool, &repo).await? {
+        let project = match projects::get_approved_project(&self.db, &repo).await? {
             Some(p) => p,
             None => {
                 info!(repo, "event from unlisted/unapproved project, ignoring");
@@ -161,7 +161,7 @@ impl Dispatcher {
             .await?;
 
         // Sync to DB
-        projects::update_forum_id(&self.pool, repo, &new_forum_id.get().to_string()).await?;
+        projects::update_forum_id(&self.db, repo, &new_forum_id.get().to_string()).await?;
 
         Ok(new_forum_id)
     }
@@ -208,7 +208,7 @@ impl Dispatcher {
             .await?;
 
         let tid_str = tid.get().to_string();
-        projects::update_thread_id(&self.pool, repo, &tid_str).await?;
+        projects::update_thread_id(&self.db, repo, &tid_str).await?;
 
         Ok(tid_str)
     }
@@ -458,13 +458,12 @@ impl Dispatcher {
         }
 
         let guild_id = Id::new(project.guild_id.parse::<u64>().unwrap_or(0));
-        let config =
-            match crate::governance::server_config::get_config(&self.pool, &project.guild_id)
-                .await?
-            {
-                Some(c) => c,
-                None => return Ok(()),
-            };
+        let config = match crate::governance::server_config::get_config(&self.db, &project.guild_id)
+            .await?
+        {
+            Some(c) => c,
+            None => return Ok(()),
+        };
 
         // Self-healing for announcements channel
         let announce_channel = match self
@@ -476,7 +475,7 @@ impl Dispatcher {
                 // Sync if DB has wrong ID
                 if id.get().to_string() != config.announcements_id {
                     crate::governance::server_config::save_config(
-                        &self.pool,
+                        &self.db,
                         &project.guild_id,
                         &id.get().to_string(),
                         &config.github_forum_id,
@@ -491,7 +490,7 @@ impl Dispatcher {
             None => {
                 let id = self.discord.create_announcements_channel(guild_id).await?;
                 crate::governance::server_config::save_config(
-                    &self.pool,
+                    &self.db,
                     &project.guild_id,
                     &id.get().to_string(),
                     &config.github_forum_id,

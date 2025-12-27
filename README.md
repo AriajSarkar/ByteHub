@@ -28,7 +28,8 @@ A powerful bridge that connects your GitHub repositories to Discord, providing r
 ### Prerequisites
 
 - Rust 1.85+
-- PostgreSQL database (we recommend [Aiven](https://aiven.io/))
+- [Convex](https://convex.dev/) account (free tier available)
+- Node.js 18+ (for Convex functions)
 - Discord Bot Token
 - GitHub Webhook Secret
 
@@ -41,11 +42,18 @@ cp .env.example .env
 Edit `.env` with your credentials:
 
 ```env
-DATABASE_URL=postgres://...
+CONVEX_URL=https://your-project.convex.cloud
 GITHUB_WEBHOOK_SECRET=your_secret
 DISCORD_PUBLIC_KEY=your_key
 DISCORD_BOT_TOKEN=your_token
 DISCORD_APPLICATION_ID=your_app_id
+```
+
+### Setup Convex
+
+```bash
+pnpm install
+npx convex dev --once --configure=new
 ```
 
 ### Run Locally

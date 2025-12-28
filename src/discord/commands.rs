@@ -501,8 +501,9 @@ pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Res
     };
 
     // Find or create Mod category with channels
+    // Use find_channel_containing to match categories like "🔒 Mod" or "Moderators"
     let (mod_cat_id, review_id, approvals_id) =
-        match state.discord.find_channel_by_name(gid, "Mod").await? {
+        match state.discord.find_channel_containing(gid, "mod").await? {
             Some(cat_id) => {
                 // Category exists, find or create sub-channels
                 let review = match state

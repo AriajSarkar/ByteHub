@@ -166,35 +166,49 @@ impl DiscordInterface for DiscordClient {
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)> {
-        // Create category
+        use twilight_model::channel::permission_overwrite::{
+            PermissionOverwrite, PermissionOverwriteType,
+        };
+        use twilight_model::guild::Permissions;
+
+        let everyone_deny = PermissionOverwrite {
+            id: guild_id.cast(),
+            kind: PermissionOverwriteType::Role,
+            allow: Permissions::empty(),
+            deny: Permissions::VIEW_CHANNEL,
+        };
+
         let category = self
             .http
             .create_guild_channel(guild_id, "Mod")
             .kind(ChannelType::GuildCategory)
+            .permission_overwrites(&[everyone_deny.clone()])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        // Create project-review channel in category
+        // Create project-review channel in category (inherits permissions + explicit deny)
         let review = self
             .http
             .create_guild_channel(guild_id, "project-review")
             .kind(ChannelType::GuildText)
             .parent_id(category.id)
+            .permission_overwrites(&[everyone_deny.clone()])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        // Create approvals channel in category
+        // Create approvals channel in category (inherits permissions + explicit deny)
         let approvals = self
             .http
             .create_guild_channel(guild_id, "approvals")
             .kind(ChannelType::GuildText)
             .parent_id(category.id)
+            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()

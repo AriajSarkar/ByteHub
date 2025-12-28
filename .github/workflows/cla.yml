@@ -26,7 +26,7 @@ jobs:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/${{ github.repository }}/blob/main/LICENSE.md#8-contributor-license-agreement"
           branch: "main"
-          allowlist: bot*,dependabot*
+          allowlist: bot*,dependabot*,AriajSarkar
 
           custom-notsigned-prcomment: |
             ## Contributor License Agreement

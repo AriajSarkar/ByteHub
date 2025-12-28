@@ -1,11 +1,14 @@
-use sqlx::PgPool;
-use uuid::Uuid;
+use convex::Value as ConvexValue;
+use maplit::btreemap;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::storage::convex::ConvexDb;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
-    pub id: Uuid,
+    #[serde(rename = "_id")]
+    pub id: String,
     pub name: String,
     pub github_repo: String,
     pub forum_channel_id: String,
@@ -14,160 +17,174 @@ pub struct Project {
     pub is_approved: bool,
 }
 
-pub async fn submit_project(pool: &PgPool, github_repo: &str) -> Result<Uuid> {
-    let github_repo = github_repo.to_lowercase();
-    let name = github_repo.split('/').last().unwrap_or(&github_repo);
-    let id = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        INSERT INTO projects (name, github_repo, forum_channel_id)
-        VALUES ($1, $2, '')
-        ON CONFLICT (github_repo) DO NOTHING
-        RETURNING id
-        "#,
-    )
-    .bind(name)
-    .bind(&github_repo)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| Error::InvalidPayload("project already exists".into()))?;
+/// Parse mutation result that returns { success: true/false, id?, error? }
+fn parse_mutation_result(result: &serde_json::Value) -> Result<Option<String>> {
+    let success = result
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    Ok(id)
+    if success {
+        let id = result
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Ok(id)
+    } else {
+        let error = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        Err(Error::InvalidPayload(error.to_string()))
+    }
 }
 
-pub async fn approve_project(pool: &PgPool, github_repo: &str) -> Result<()> {
-    let rows =
-        sqlx::query("UPDATE projects SET is_approved = true WHERE LOWER(github_repo) = LOWER($1)")
-            .bind(github_repo)
-            .execute(pool)
-            .await?
-            .rows_affected();
+pub async fn submit_project(db: &ConvexDb, github_repo: &str) -> Result<String> {
+    let result = db
+        .mutation(
+            "projects:submit",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+            },
+        )
+        .await?;
 
-    if rows == 0 {
-        return Err(Error::NotFound("project not found".into()));
-    }
+    parse_mutation_result(&result)?
+        .ok_or_else(|| Error::InvalidPayload("Expected ID from submit".into()))
+}
+
+pub async fn approve_project(db: &ConvexDb, github_repo: &str) -> Result<()> {
+    let result = db
+        .mutation(
+            "projects:approve",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+            },
+        )
+        .await?;
+
+    parse_mutation_result(&result)?;
     Ok(())
 }
 
 pub async fn approve_project_with_forum(
-    pool: &PgPool,
+    db: &ConvexDb,
     github_repo: &str,
     forum_channel_id: &str,
     guild_id: &str,
 ) -> Result<()> {
-    // Get project ID first
-    let project_id: Option<uuid::Uuid> =
-        sqlx::query_scalar("SELECT id FROM projects WHERE LOWER(github_repo) = LOWER($1)")
-            .bind(github_repo)
-            .fetch_optional(pool)
-            .await?;
-
-    let project_id = project_id.ok_or(Error::NotFound("project not found".into()))?;
-
-    // Update project
-    sqlx::query(
-        "UPDATE projects SET is_approved = true, forum_channel_id = $2, guild_id = $3 WHERE LOWER(github_repo) = LOWER($1)",
-    )
-    .bind(github_repo)
-    .bind(forum_channel_id)
-    .bind(guild_id)
-    .execute(pool)
-    .await?;
-
-    // Create default rules for this project (catch-all for all event types)
-    let default_rules = vec![
-        // Workflow runs - post all
-        (
-            r#"{"event_type": "workflow_run.completed"}"#,
-            r#"{"post_forum": true, "post_announce": false}"#,
-        ),
-        // Releases - post all
-        (
-            r#"{"event_type": "release.published"}"#,
-            r#"{"post_forum": true, "post_announce": true}"#,
-        ),
-        // PRs merged - post all
-        (
-            r#"{"event_type": "pull_request.closed", "merged": true}"#,
-            r#"{"post_forum": true, "post_announce": false}"#,
-        ),
-        // Issues opened - post all
-        (
-            r#"{"event_type": "issues.opened"}"#,
-            r#"{"post_forum": true, "post_announce": false}"#,
-        ),
-    ];
-
-    for (i, (conditions, actions)) in default_rules.iter().enumerate() {
-        sqlx::query(
-            "INSERT INTO rules (project_id, priority, conditions, actions) VALUES ($1, $2, $3::jsonb, $4::jsonb) ON CONFLICT DO NOTHING"
+    let result = db
+        .mutation(
+            "projects:approveWithForum",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+                "forum_channel_id".into() => ConvexValue::String(forum_channel_id.to_string()),
+                "guild_id".into() => ConvexValue::String(guild_id.to_string()),
+            },
         )
-        .bind(project_id)
-        .bind(i as i32)
-        .bind(conditions)
-        .bind(actions)
-        .execute(pool)
         .await?;
+
+    parse_mutation_result(&result)?;
+    Ok(())
+}
+
+pub async fn deny_project(db: &ConvexDb, github_repo: &str) -> Result<()> {
+    let result = db
+        .mutation(
+            "projects:deny",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+            },
+        )
+        .await?;
+
+    // deny now returns { success: true/false }
+    let success = result
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !success {
+        let error = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Project not found");
+        return Err(Error::NotFound(error.to_string()));
     }
 
     Ok(())
 }
 
-pub async fn deny_project(pool: &PgPool, github_repo: &str) -> Result<()> {
-    sqlx::query("DELETE FROM projects WHERE LOWER(github_repo) = LOWER($1)")
-        .bind(github_repo)
-        .execute(pool)
+pub async fn get_approved_project(db: &ConvexDb, github_repo: &str) -> Result<Option<Project>> {
+    let result = db
+        .query(
+            "projects:getApproved",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+            },
+        )
         .await?;
-    Ok(())
+
+    if result.is_null() {
+        return Ok(None);
+    }
+
+    let project: Project = serde_json::from_value(result)
+        .map_err(|e| Error::InvalidPayload(format!("Failed to parse project: {}", e)))?;
+
+    Ok(Some(project))
 }
 
-pub async fn get_approved_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
-    let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE LOWER(github_repo) = LOWER($1) AND is_approved = true",
-    )
-    .bind(github_repo)
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_project(db: &ConvexDb, github_repo: &str) -> Result<Option<Project>> {
+    let result = db
+        .query(
+            "projects:get",
+            btreemap! {
+                "github_repo".into() => ConvexValue::String(github_repo.to_string()),
+            },
+        )
+        .await?;
 
-    Ok(project)
+    if result.is_null() {
+        return Ok(None);
+    }
+
+    let project: Project = serde_json::from_value(result)
+        .map_err(|e| Error::InvalidPayload(format!("Failed to parse project: {}", e)))?;
+
+    Ok(Some(project))
 }
 
-pub async fn get_project(pool: &PgPool, github_repo: &str) -> Result<Option<Project>> {
-    let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects WHERE LOWER(github_repo) = LOWER($1)",
-    )
-    .bind(github_repo)
-    .fetch_optional(pool)
-    .await?;
+pub async fn list_projects(db: &ConvexDb) -> Result<Vec<Project>> {
+    let result = db.query("projects:list", btreemap! {}).await?;
 
-    Ok(project)
-}
-
-pub async fn list_projects(pool: &PgPool) -> Result<Vec<Project>> {
-    let projects = sqlx::query_as::<_, Project>(
-        "SELECT id, name, github_repo, forum_channel_id, thread_id, guild_id, is_approved FROM projects ORDER BY is_approved DESC, name ASC"
-    )
-    .fetch_all(pool)
-    .await?;
+    let projects: Vec<Project> = serde_json::from_value(result)
+        .map_err(|e| Error::InvalidPayload(format!("Failed to parse projects: {}", e)))?;
 
     Ok(projects)
 }
 
-/// Update project's forum channel ID
-pub async fn update_forum_id(pool: &PgPool, repo: &str, forum_id: &str) -> Result<()> {
-    sqlx::query("UPDATE projects SET forum_channel_id = $1 WHERE LOWER(github_repo) = LOWER($2)")
-        .bind(forum_id)
-        .bind(repo)
-        .execute(pool)
-        .await?;
+pub async fn update_forum_id(db: &ConvexDb, repo: &str, forum_id: &str) -> Result<()> {
+    db.mutation(
+        "projects:updateForumId",
+        btreemap! {
+            "github_repo".into() => ConvexValue::String(repo.to_string()),
+            "forum_id".into() => ConvexValue::String(forum_id.to_string()),
+        },
+    )
+    .await?;
+
     Ok(())
 }
 
-/// Update project's activity thread ID
-pub async fn update_thread_id(pool: &PgPool, repo: &str, thread_id: &str) -> Result<()> {
-    sqlx::query("UPDATE projects SET thread_id = $2 WHERE LOWER(github_repo) = LOWER($1)")
-        .bind(repo)
-        .bind(thread_id)
-        .execute(pool)
-        .await?;
+pub async fn update_thread_id(db: &ConvexDb, repo: &str, thread_id: &str) -> Result<()> {
+    db.mutation(
+        "projects:updateThreadId",
+        btreemap! {
+            "github_repo".into() => ConvexValue::String(repo.to_string()),
+            "thread_id".into() => ConvexValue::String(thread_id.to_string()),
+        },
+    )
+    .await?;
+
     Ok(())
 }

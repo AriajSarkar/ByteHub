@@ -1,57 +1,12 @@
-mod config;
-mod discord;
-mod error;
-mod github;
-mod governance;
-mod router;
-mod storage;
-
-use axum::{
-    routing::{get, post},
-    Json, Router,
-};
-use sqlx::PgPool;
+use bytehub::config::Config;
+use bytehub::discord::client::DiscordClient;
+use bytehub::storage::convex::ConvexDb;
+use bytehub::{create_app, AppState};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::Config;
-use crate::discord::client::DiscordClient;
-use crate::discord::commands::handle_interaction;
-use crate::github::webhook::handle_webhook;
-
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Clone)]
-pub struct AppState {
-    pub config: Config,
-    pub pool: PgPool,
-    pub discord: DiscordClient,
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "ok",
-        "service": "bytehub",
-        "version": VERSION
-    }))
-}
-
-async fn root() -> &'static str {
-    "⚡ ByteHub - GitHub → Governance → Discord"
-}
-
-use axum::extract::State;
-
-async fn debug_env(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "discord_public_key_len": state.config.discord_public_key.len(),
-        "discord_public_key_prefix": &state.config.discord_public_key[..8.min(state.config.discord_public_key.len())],
-        "discord_application_id": state.config.discord_application_id,
-        "discord_bot_token_len": state.config.discord_bot_token.len(),
-        "database_url_set": !state.config.database_url.is_empty(),
-        "github_webhook_secret_set": !state.config.github_webhook_secret.is_empty(),
-    }))
-}
 
 fn print_banner(addr: &SocketAddr) {
     let display_host = if addr.ip().is_unspecified() {
@@ -71,6 +26,7 @@ fn print_banner(addr: &SocketAddr) {
         addr.port()
     );
     println!("  \x1b[32m→\x1b[0m Version: \x1b[33m{}\x1b[0m", VERSION);
+    println!("  \x1b[32m→\x1b[0m Database: \x1b[34mConvex\x1b[0m");
     println!();
     println!("  \x1b[90mEndpoints:\x1b[0m");
     println!("    \x1b[32mGET \x1b[0m /                  \x1b[90m← Health check\x1b[0m");
@@ -91,23 +47,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env();
-    let pool = storage::db::create_pool(&config.database_url).await?;
+    let db = ConvexDb::new(&config.convex_url).await?;
     let discord = DiscordClient::new(&config.discord_bot_token, config.discord_application_id);
 
     let state = AppState {
         config: config.clone(),
-        pool,
-        discord,
+        db,
+        discord: Arc::new(discord),
     };
 
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health))
-        .route("/debug", get(debug_env))
-        .route("/webhooks/github", post(handle_webhook))
-        .route("/webhooks/discord", post(handle_interaction))
-        .with_state(state);
-
+    let app = create_app(state);
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
     print_banner(&addr);

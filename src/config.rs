@@ -2,11 +2,12 @@ use std::env;
 
 #[derive(Clone)]
 pub struct Config {
-    pub database_url: String,
+    pub convex_url: String,
     pub github_webhook_secret: String,
     pub discord_public_key: String,
     pub discord_bot_token: String,
     pub discord_application_id: u64,
+    pub discord_invite: Option<String>,
     pub host: String,
     pub port: u16,
 }
@@ -14,7 +15,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Self {
         Self {
-            database_url: env::var("DATABASE_URL").expect("DATABASE_URL required"),
+            convex_url: env::var("CONVEX_URL").expect("CONVEX_URL required"),
             github_webhook_secret: env::var("GITHUB_WEBHOOK_SECRET")
                 .expect("GITHUB_WEBHOOK_SECRET required"),
             discord_public_key: env::var("DISCORD_PUBLIC_KEY")
@@ -24,6 +25,7 @@ impl Config {
                 .expect("DISCORD_APPLICATION_ID required")
                 .parse()
                 .expect("DISCORD_APPLICATION_ID must be a valid u64"),
+            discord_invite: env::var("DISCORD_INVITE").ok(),
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into()),
             port: env::var("PORT")
                 .unwrap_or_else(|_| "3000".into())

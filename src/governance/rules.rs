@@ -1,10 +1,10 @@
+use convex::Value as ConvexValue;
+use maplit::btreemap;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
-use uuid::Uuid;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::github::events::ParsedEvent;
-use crate::governance::whitelist;
+use crate::storage::convex::ConvexDb;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleConditions {
@@ -21,114 +21,53 @@ pub struct RuleActions {
     pub template: Option<String>,
 }
 
-#[derive(Debug, sqlx::FromRow)]
-pub struct Rule {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub priority: i32,
-    pub conditions: serde_json::Value,
-    pub actions: serde_json::Value,
-}
-
 pub struct RuleMatch {
     pub actions: RuleActions,
-    pub rule_id: Uuid,
+    pub rule_id: String,
 }
 
 pub async fn evaluate_rules(
-    pool: &PgPool,
-    project_id: Uuid,
+    db: &ConvexDb,
+    project_id: &str,
     event: &ParsedEvent,
 ) -> Result<Option<RuleMatch>> {
-    let rules = sqlx::query_as::<_, Rule>(
-        "SELECT id, project_id, priority, conditions, actions FROM rules WHERE project_id = $1 ORDER BY priority DESC"
-    )
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-
     let event_key = event.event_key();
-    let event_labels = event.labels();
-    let actor = event.actor();
     let is_merged = event.is_merged();
 
-    for rule in rules {
-        let conditions: RuleConditions =
-            serde_json::from_value(rule.conditions.clone()).unwrap_or(RuleConditions {
-                event_type: None,
-                labels: None,
-                actor_whitelisted: None,
-                merged: None,
-            });
-
-        if !matches_conditions(
-            pool,
-            &conditions,
-            &event_key,
-            &event_labels,
-            actor,
-            is_merged,
+    let result = db
+        .query(
+            "rules:evaluateForProject",
+            btreemap! {
+                "project_id".into() => ConvexValue::String(project_id.to_string()),
+                "event_key".into() => match &event_key {
+                    Some(k) => ConvexValue::String(k.clone()),
+                    None => ConvexValue::Null,
+                },
+                "is_merged".into() => ConvexValue::Boolean(is_merged),
+            },
         )
-        .await?
-        {
-            continue;
-        }
+        .await?;
 
-        let actions: RuleActions =
-            serde_json::from_value(rule.actions.clone()).unwrap_or(RuleActions {
-                post_forum: false,
-                post_announce: false,
-                template: None,
-            });
-
-        return Ok(Some(RuleMatch {
-            actions,
-            rule_id: rule.id,
-        }));
+    if result.is_null() {
+        return Ok(None);
     }
 
-    Ok(None)
-}
+    let obj = result
+        .as_object()
+        .ok_or_else(|| Error::InvalidPayload("Expected object from evaluate".into()))?;
 
-async fn matches_conditions(
-    pool: &PgPool,
-    conditions: &RuleConditions,
-    event_key: &Option<String>,
-    event_labels: &[String],
-    actor: Option<&str>,
-    is_merged: bool,
-) -> Result<bool> {
-    if let Some(ref required_type) = conditions.event_type {
-        if event_key.as_ref() != Some(required_type) {
-            return Ok(false);
-        }
-    }
+    let rule_id = obj
+        .get("rule_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::InvalidPayload("Missing rule_id".into()))?
+        .to_string();
 
-    if let Some(ref required_labels) = conditions.labels {
-        for label in required_labels {
-            if !event_labels.iter().any(|l| l == label) {
-                return Ok(false);
-            }
-        }
-    }
+    let actions_value = obj
+        .get("actions")
+        .ok_or_else(|| Error::InvalidPayload("Missing actions".into()))?;
 
-    if let Some(require_whitelisted) = conditions.actor_whitelisted {
-        if require_whitelisted {
-            if let Some(actor_name) = actor {
-                if !whitelist::is_whitelisted(pool, actor_name).await? {
-                    return Ok(false);
-                }
-            } else {
-                return Ok(false);
-            }
-        }
-    }
+    let actions: RuleActions = serde_json::from_value(actions_value.clone())
+        .map_err(|e| Error::InvalidPayload(format!("Failed to parse actions: {}", e)))?;
 
-    if let Some(require_merged) = conditions.merged {
-        if require_merged && !is_merged {
-            return Ok(false);
-        }
-    }
-
-    Ok(true)
+    Ok(Some(RuleMatch { actions, rule_id }))
 }

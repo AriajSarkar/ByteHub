@@ -1,21 +1,24 @@
-use sqlx::PgPool;
 use tracing::info;
 use twilight_model::id::Id;
 
-use crate::discord::client::DiscordClient;
-use crate::discord::forum::{COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS};
-use crate::error::{Error, Result};
+use crate::discord::client::DiscordInterface;
+use crate::discord::formatters::{
+    COLOR_BOUNTY, COLOR_FAILURE, COLOR_ISSUE, COLOR_PR, COLOR_SUCCESS,
+};
+use crate::error::Result;
 use crate::github::events::ParsedEvent;
 use crate::governance::projects;
+use crate::storage::convex::ConvexDb;
+use std::sync::Arc;
 
 pub struct Dispatcher {
-    pool: PgPool,
-    discord: DiscordClient,
+    db: ConvexDb,
+    discord: Arc<dyn DiscordInterface>,
 }
 
 impl Dispatcher {
-    pub fn new(pool: PgPool, discord: DiscordClient) -> Self {
-        Self { pool, discord }
+    pub fn new(db: ConvexDb, discord: Arc<dyn DiscordInterface>) -> Self {
+        Self { db, discord }
     }
 
     pub async fn dispatch(&self, event: ParsedEvent) -> Result<()> {
@@ -24,7 +27,7 @@ impl Dispatcher {
             None => return Ok(()),
         };
 
-        let project = match projects::get_approved_project(&self.pool, &repo).await? {
+        let project = match projects::get_approved_project(&self.db, &repo).await? {
             Some(p) => p,
             None => {
                 info!(repo, "event from unlisted/unapproved project, ignoring");
@@ -68,7 +71,7 @@ impl Dispatcher {
         Ok(())
     }
 
-    fn should_log(&self, event: &ParsedEvent) -> bool {
+    pub fn should_log(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
                 if e.action != "completed" {
@@ -84,7 +87,7 @@ impl Dispatcher {
         }
     }
 
-    fn should_post(&self, event: &ParsedEvent) -> bool {
+    pub fn should_post(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::WorkflowRun(e) => {
                 if !self.should_log(event) {
@@ -107,7 +110,7 @@ impl Dispatcher {
         }
     }
 
-    fn should_announce(&self, event: &ParsedEvent) -> bool {
+    pub fn should_announce(&self, event: &ParsedEvent) -> bool {
         match event {
             ParsedEvent::Release(_) => true,
             ParsedEvent::Issue(e) => e.issue.labels.iter().any(|l| l.name == "bounty"),
@@ -116,7 +119,7 @@ impl Dispatcher {
         }
     }
 
-    fn is_bot_actor(&self, login: &str) -> bool {
+    pub fn is_bot_actor(&self, login: &str) -> bool {
         let bots = ["dependabot", "renovate", "github-actions"];
         bots.iter().any(|b| login.to_lowercase().contains(b))
     }
@@ -127,15 +130,7 @@ impl Dispatcher {
         repo: &str,
         guild_id: Id<twilight_model::id::marker::GuildMarker>,
     ) -> Result<Id<twilight_model::id::marker::ChannelMarker>> {
-        let channels = self
-            .discord
-            .http
-            .guild_channels(guild_id)
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?
-            .model()
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?;
+        let channels = self.discord.guild_channels(guild_id).await?;
 
         if !project.forum_channel_id.is_empty() {
             if let Ok(id_u64) = project.forum_channel_id.parse::<u64>() {
@@ -159,14 +154,14 @@ impl Dispatcher {
             None => self.discord.create_github_category(guild_id).await?,
         };
 
-        let project_name = repo.split('/').last().unwrap_or(repo);
+        let project_name = repo.rsplit('/').next().unwrap_or(repo);
         let new_forum_id = self
             .discord
             .create_project_forum(guild_id, category_id, project_name)
             .await?;
 
         // Sync to DB
-        projects::update_forum_id(&self.pool, repo, &new_forum_id.get().to_string()).await?;
+        projects::update_forum_id(&self.db, repo, &new_forum_id.get().to_string()).await?;
 
         Ok(new_forum_id)
     }
@@ -178,7 +173,7 @@ impl Dispatcher {
         forum_id: Id<twilight_model::id::marker::ChannelMarker>,
         guild_id: Id<twilight_model::id::marker::GuildMarker>,
     ) -> Result<String> {
-        let project_name = repo.split('/').last().unwrap_or(repo);
+        let project_name = repo.rsplit('/').next().unwrap_or(repo);
         let thread_name = format!("📦 {} Activity", project_name);
 
         // If thread ID exists in DB, verify it still exists in Discord
@@ -213,7 +208,7 @@ impl Dispatcher {
             .await?;
 
         let tid_str = tid.get().to_string();
-        projects::update_thread_id(&self.pool, repo, &tid_str).await?;
+        projects::update_thread_id(&self.db, repo, &tid_str).await?;
 
         Ok(tid_str)
     }
@@ -433,7 +428,9 @@ impl Dispatcher {
                 .send_message_with_embed(tid, &title, &description, color, footer_text.as_deref())
                 .await?;
         } else {
-            self.discord
+            // Create as public forum thread, but then immediately lock and pin
+            let tid = self
+                .discord
                 .create_forum_thread_with_embed(
                     forum_id,
                     thread_name,
@@ -443,6 +440,9 @@ impl Dispatcher {
                     footer_text.as_deref(),
                 )
                 .await?;
+
+            // Secure the thread (Lock + Keep Unarchived)
+            let _ = self.discord.secure_thread(tid).await;
         }
 
         Ok(())
@@ -458,13 +458,12 @@ impl Dispatcher {
         }
 
         let guild_id = Id::new(project.guild_id.parse::<u64>().unwrap_or(0));
-        let config =
-            match crate::governance::server_config::get_config(&self.pool, &project.guild_id)
-                .await?
-            {
-                Some(c) => c,
-                None => return Ok(()),
-            };
+        let config = match crate::governance::server_config::get_config(&self.db, &project.guild_id)
+            .await?
+        {
+            Some(c) => c,
+            None => return Ok(()),
+        };
 
         // Self-healing for announcements channel
         let announce_channel = match self
@@ -476,7 +475,7 @@ impl Dispatcher {
                 // Sync if DB has wrong ID
                 if id.get().to_string() != config.announcements_id {
                     crate::governance::server_config::save_config(
-                        &self.pool,
+                        &self.db,
                         &project.guild_id,
                         &id.get().to_string(),
                         &config.github_forum_id,
@@ -491,7 +490,7 @@ impl Dispatcher {
             None => {
                 let id = self.discord.create_announcements_channel(guild_id).await?;
                 crate::governance::server_config::save_config(
-                    &self.pool,
+                    &self.db,
                     &project.guild_id,
                     &id.get().to_string(),
                     &config.github_forum_id,

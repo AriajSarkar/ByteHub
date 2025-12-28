@@ -145,7 +145,10 @@ impl DiscordInterface for MockDiscord {
     ) -> Result<()> {
         Ok(())
     }
-    async fn secure_thread(&self, _thread_id: Id<ChannelMarker>) -> Result<()> {
+    async fn lock_thread(&self, _thread_id: Id<ChannelMarker>) -> Result<()> {
+        Ok(())
+    }
+    async fn pin_and_lock_thread(&self, _thread_id: Id<ChannelMarker>) -> Result<()> {
         Ok(())
     }
 }

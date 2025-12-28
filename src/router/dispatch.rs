@@ -207,6 +207,9 @@ impl Dispatcher {
             )
             .await?;
 
+        // Pin and lock the Activity thread (Discord allows only 1 pinned thread per forum)
+        let _ = self.discord.pin_and_lock_thread(tid).await;
+
         let tid_str = tid.get().to_string();
         projects::update_thread_id(&self.db, repo, &tid_str).await?;
 
@@ -441,8 +444,8 @@ impl Dispatcher {
                 )
                 .await?;
 
-            // Secure the thread (Lock + Keep Unarchived)
-            let _ = self.discord.secure_thread(tid).await;
+            // Lock the sidebar thread (but don't pin - Discord allows only 1 pinned thread per forum)
+            let _ = self.discord.lock_thread(tid).await;
         }
 
         Ok(())

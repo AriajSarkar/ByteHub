@@ -78,7 +78,8 @@ pub trait DiscordInterface: Send + Sync {
         color: u32,
         footer: Option<&str>,
     ) -> Result<()>;
-    async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()>;
+    async fn lock_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()>;
+    async fn pin_and_lock_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -433,7 +434,21 @@ impl DiscordInterface for DiscordClient {
         Ok(())
     }
 
-    async fn secure_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
+    /// Lock thread only (for sidebar threads - PRs, Issues, CI status, etc.)
+    async fn lock_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
+        // Lock the thread so only moderators can post
+        self.http
+            .update_thread(thread_id)
+            .archived(false)
+            .locked(true)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Pin and lock thread (for Activity thread only - Discord allows only 1 pinned thread per forum)
+    async fn pin_and_lock_thread(&self, thread_id: Id<ChannelMarker>) -> Result<()> {
         use twilight_model::channel::ChannelFlags;
 
         // Lock the thread
@@ -444,7 +459,7 @@ impl DiscordInterface for DiscordClient {
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        // Pin the thread using update_channel (which has the flags method in 0.17)
+        // Pin the thread (Discord allows only 1 pinned thread per forum)
         self.http
             .update_channel(thread_id)
             .flags(ChannelFlags::PINNED)

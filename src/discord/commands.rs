@@ -214,8 +214,14 @@ async fn handle_submit_project(db: &ConvexDb, data: &InteractionData) -> Result<
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
-    projects::submit_project(db, repo).await?;
-    Ok(format!("Project `{}` submitted for approval.", repo))
+    // Handle the case where project already exists
+    match projects::submit_project(db, repo).await {
+        Ok(_) => Ok(format!("Project `{}` submitted for approval.", repo)),
+        Err(Error::InvalidPayload(msg)) if msg.contains("already exists") => {
+            Ok(format!("⚠️ Project `{}` has already been submitted.", repo))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn do_approve(

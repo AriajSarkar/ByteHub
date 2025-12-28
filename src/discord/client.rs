@@ -167,54 +167,40 @@ impl DiscordInterface for DiscordClient {
         Ok(channel.id)
     }
 
-    /// Create private Mod category with channels
+    /// Create Mod category with channels (public, inherits server permissions)
     async fn create_mod_category(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)> {
-        use twilight_model::channel::permission_overwrite::{
-            PermissionOverwrite, PermissionOverwriteType,
-        };
-        use twilight_model::guild::Permissions;
-
-        let everyone_deny = PermissionOverwrite {
-            id: guild_id.cast(),
-            kind: PermissionOverwriteType::Role,
-            allow: Permissions::empty(),
-            deny: Permissions::VIEW_CHANNEL,
-        };
-
+        // Create category (no permission overwrites - inherits server defaults)
         let category = self
             .http
             .create_guild_channel(guild_id, "Mod")
             .kind(ChannelType::GuildCategory)
-            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        // Create project-review channel in category (inherits permissions + explicit deny)
+        // Create project-review channel in category
         let review = self
             .http
             .create_guild_channel(guild_id, "project-review")
             .kind(ChannelType::GuildText)
             .parent_id(category.id)
-            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
             .await
             .map_err(|e| Error::Discord(e.to_string()))?;
 
-        // Create approvals channel in category (inherits permissions + explicit deny)
+        // Create approvals channel in category
         let approvals = self
             .http
             .create_guild_channel(guild_id, "approvals")
             .kind(ChannelType::GuildText)
             .parent_id(category.id)
-            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()

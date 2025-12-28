@@ -1,8 +1,2 @@
 # Default owners for everything
 * @AriajSarkar
-
-# Specific paths
-/.github/ @AriajSarkar
-/src/ @AriajSarkar
-/tests/ @AriajSarkar
-/migrations/ @AriajSarkar

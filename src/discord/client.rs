@@ -36,6 +36,12 @@ pub trait DiscordInterface: Send + Sync {
         guild_id: Id<GuildMarker>,
         keyword: &str,
     ) -> Result<Option<Id<ChannelMarker>>>;
+    /// Find a category containing keyword (case-insensitive, only matches GuildCategory type)
+    async fn find_category_containing(
+        &self,
+        guild_id: Id<GuildMarker>,
+        keyword: &str,
+    ) -> Result<Option<Id<ChannelMarker>>>;
     async fn create_channel_in_category(
         &self,
         guild_id: Id<GuildMarker>,
@@ -258,6 +264,37 @@ impl DiscordInterface for DiscordClient {
 
         let keyword_lower = keyword.to_lowercase();
         for channel in channels {
+            if let Some(name) = channel.name.as_deref() {
+                if name.to_lowercase().contains(&keyword_lower) {
+                    return Ok(Some(channel.id));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Find a category containing keyword (case-insensitive, only matches GuildCategory type)
+    /// Use this when you specifically need a category, not any channel
+    async fn find_category_containing(
+        &self,
+        guild_id: Id<GuildMarker>,
+        keyword: &str,
+    ) -> Result<Option<Id<ChannelMarker>>> {
+        let channels = self
+            .http
+            .guild_channels(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        let keyword_lower = keyword.to_lowercase();
+        for channel in channels {
+            // Only match categories (not text channels, forums, etc.)
+            if channel.kind != ChannelType::GuildCategory {
+                continue;
+            }
             if let Some(name) = channel.name.as_deref() {
                 if name.to_lowercase().contains(&keyword_lower) {
                     return Ok(Some(channel.id));

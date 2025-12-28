@@ -487,7 +487,7 @@ pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Res
     // Always find or create channels (handles deleted/stale channels)
     let announcements_id = match state
         .discord
-        .find_channel_by_name(gid, "announcements")
+        .find_channel_containing(gid, "announcements")
         .await?
     {
         Some(id) => id,

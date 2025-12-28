@@ -31,6 +31,11 @@ pub trait DiscordInterface: Send + Sync {
         guild_id: Id<GuildMarker>,
         name: &str,
     ) -> Result<Option<Id<ChannelMarker>>>;
+    async fn find_channel_containing(
+        &self,
+        guild_id: Id<GuildMarker>,
+        keyword: &str,
+    ) -> Result<Option<Id<ChannelMarker>>>;
     async fn create_channel_in_category(
         &self,
         guild_id: Id<GuildMarker>,
@@ -199,7 +204,7 @@ impl DiscordInterface for DiscordClient {
         Ok((category.id, review.id, approvals.id))
     }
 
-    /// Find channel by name in guild
+    /// Find channel by name in guild (exact match)
     async fn find_channel_by_name(
         &self,
         guild_id: Id<GuildMarker>,
@@ -217,6 +222,32 @@ impl DiscordInterface for DiscordClient {
         for channel in channels {
             if channel.name.as_deref() == Some(name) {
                 return Ok(Some(channel.id));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Find channel containing keyword (case-insensitive partial match)
+    async fn find_channel_containing(
+        &self,
+        guild_id: Id<GuildMarker>,
+        keyword: &str,
+    ) -> Result<Option<Id<ChannelMarker>>> {
+        let channels = self
+            .http
+            .guild_channels(guild_id)
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?
+            .model()
+            .await
+            .map_err(|e| Error::Discord(e.to_string()))?;
+
+        let keyword_lower = keyword.to_lowercase();
+        for channel in channels {
+            if let Some(name) = channel.name.as_deref() {
+                if name.to_lowercase().contains(&keyword_lower) {
+                    return Ok(Some(channel.id));
+                }
             }
         }
         Ok(None)

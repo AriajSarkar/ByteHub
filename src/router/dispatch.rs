@@ -471,7 +471,7 @@ impl Dispatcher {
         // Self-healing for announcements channel
         let announce_channel = match self
             .discord
-            .find_channel_by_name(guild_id, "announcements")
+            .find_channel_containing(guild_id, "announcements")
             .await?
         {
             Some(id) => {

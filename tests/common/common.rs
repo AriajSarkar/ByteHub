@@ -86,6 +86,13 @@ impl DiscordInterface for MockDiscord {
     ) -> Result<Option<Id<ChannelMarker>>> {
         Ok(None)
     }
+    async fn find_channel_containing(
+        &self,
+        _guild_id: Id<GuildMarker>,
+        _keyword: &str,
+    ) -> Result<Option<Id<ChannelMarker>>> {
+        Ok(None)
+    }
     async fn create_channel_in_category(
         &self,
         _guild_id: Id<GuildMarker>,

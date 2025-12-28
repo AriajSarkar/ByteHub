@@ -5,7 +5,7 @@
 A powerful bridge that connects your GitHub repositories to Discord, providing real-time notifications, project governance, and community engagement tools.
 
 [![License](https://img.shields.io/badge/license-Source%20Available-blue.svg)](LICENSE.md)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org/)
 [![CI](https://github.com/AriajSarkar/ByteHub/actions/workflows/ci.yml/badge.svg)](https://github.com/AriajSarkar/ByteHub/actions/workflows/ci.yml)
 
 <a href="https://buymeacoffee.com/rajsarkar0f" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a>
@@ -27,7 +27,7 @@ A powerful bridge that connects your GitHub repositories to Discord, providing r
 
 ### Prerequisites
 
-- Rust 1.85+
+- Rust 1.91+
 - [Convex](https://convex.dev/) account (free tier available)
 - Node.js 18+ (for Convex functions)
 - Discord Bot Token
@@ -148,7 +148,7 @@ We welcome contributions! Please read our [Contributing Guide](CONTRIBUTING.md) 
 
 ## 🔒 Security
 
-Found a vulnerability? Please report it privately to [rajsarkarpc@gmail.com](mailto:rajsarkarpc@gmail.com).
+Found a vulnerability?
 
 See [SECURITY.md](SECURITY.md) for our security policy.
 
@@ -159,13 +159,6 @@ See [SECURITY.md](SECURITY.md) for our security policy.
 If ByteHub helps your project, consider supporting development:
 
 <a href="https://buymeacoffee.com/rajsarkar0f" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
-
----
-
-## 📞 Contact
-
-- **Author:** Raj Sarkar ([@AriajSarkar](https://github.com/AriajSarkar))
-- **Email:** rajsarkarpc@gmail.com
 
 ---
 

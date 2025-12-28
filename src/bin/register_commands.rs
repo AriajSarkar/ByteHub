@@ -7,10 +7,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = env::var("DISCORD_BOT_TOKEN").expect("DISCORD_BOT_TOKEN required");
     let app_id = env::var("DISCORD_APPLICATION_ID").expect("DISCORD_APPLICATION_ID required");
 
+    // All commands are guild-only (dm_permission: false, contexts: [0] = Guild context only)
+    // This prevents commands from appearing in DMs at all
     let commands = serde_json::json!([
         {
             "name": "submit-project",
             "description": "Submit a GitHub repository for mod approval",
+            "dm_permission": false,
+            "contexts": [0],
             "options": [
                 {
                     "name": "repo",
@@ -23,6 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             "name": "approve",
             "description": "Approve a submitted project (mod only)",
+            "dm_permission": false,
+            "contexts": [0],
             "options": [
                 {
                     "name": "repo",
@@ -35,6 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             "name": "deny",
             "description": "Deny/remove a project (mod only)",
+            "dm_permission": false,
+            "contexts": [0],
             "options": [
                 {
                     "name": "repo",
@@ -47,6 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             "name": "whitelist-user",
             "description": "Add a GitHub user to the whitelist (mod only)",
+            "dm_permission": false,
+            "contexts": [0],
             "options": [
                 {
                     "name": "username",
@@ -58,11 +68,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         {
             "name": "list",
-            "description": "List all registered projects (mod only)"
+            "description": "List all registered projects (mod only)",
+            "dm_permission": false,
+            "contexts": [0]
         },
         {
             "name": "setup-server",
-            "description": "Set up ByteHub channels in this server (mod only)"
+            "description": "Set up ByteHub channels in this server (mod only)",
+            "dm_permission": false,
+            "contexts": [0]
         }
     ]);
 

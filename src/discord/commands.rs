@@ -1,7 +1,9 @@
 use axum::{body::Bytes, extract::State, http::HeaderMap, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use tracing::warn;
 
+use crate::discord::rate_limit::RateLimiter;
 use crate::discord::verify::verify_discord_signature;
 use crate::error::{Error, Result};
 use crate::governance::{projects, server_config, whitelist};
@@ -12,6 +14,13 @@ use twilight_model::guild::Permissions;
 use twilight_model::id::Id;
 
 const REQUIRED_PERMISSIONS: Permissions = Permissions::from_bits_retain(326417599504);
+
+/// Rate limiter for expensive commands (setup-server, approve)
+/// 5 requests per 60 seconds per guild to prevent spam and database conflicts
+fn get_rate_limiter() -> &'static RateLimiter {
+    static RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
+    RATE_LIMITER.get_or_init(|| RateLimiter::new(60, 5))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Interaction {
@@ -109,6 +118,34 @@ pub async fn handle_interaction(
 
         // Commands that need deferred response (channel creation takes >3s)
         if data.name == "setup-server" || data.name == "approve" {
+            // Defense-in-depth: Early-exit for DM invocations
+            // (Commands should already be guild-only via dm_permission: false)
+            if interaction.guild_id.is_none() {
+                return Ok(Json(InteractionResponse {
+                    kind: 4,
+                    data: Some(ResponseData {
+                        content: "❌ This command can only be used in a server.".to_string(),
+                        flags: Some(64),
+                    }),
+                }));
+            }
+
+            // Rate limiting: Prevent command spam that causes database conflicts
+            if let Some(ref gid) = interaction.guild_id {
+                if let Err(wait_secs) = get_rate_limiter().check(gid) {
+                    return Ok(Json(InteractionResponse {
+                        kind: 4,
+                        data: Some(ResponseData {
+                            content: format!(
+                                "⏳ Rate limited. Please wait {} seconds before running this command again.",
+                                wait_secs
+                            ),
+                            flags: Some(64),
+                        }),
+                    }));
+                }
+            }
+
             check_moderator(member)?;
             let cmd_name = data.name.clone();
             let guild_id = interaction.guild_id.clone();
@@ -229,28 +266,16 @@ pub async fn do_approve(
             "Server not set up. Run /setup-server first.".into(),
         ))?;
 
-    // Parse GitHub category ID (stored in github_forum_id field)
-    let config_category_id = config.github_forum_id.clone();
-
     // Find or create GitHub category (handles deleted/stale channels)
+    // Note: save_config is idempotent, but we still avoid redundant calls for efficiency
     let github_category = match state.discord.find_channel_by_name(gid, "GitHub").await? {
         Some(id) => {
-            // If the ID in config is different from found ID, update config
-            if id.get().to_string() != config_category_id {
-                server_config::save_config(
-                    &state.db,
-                    guild_id_str,
-                    &config.announcements_id,
-                    &id.get().to_string(),
-                    config.mod_category_id.as_deref(),
-                    config.project_review_id.as_deref(),
-                    config.approvals_id.as_deref(),
-                )
-                .await?;
-            }
+            // Category exists - use it directly
+            // Config sync will happen via setup-server if needed
             id
         }
         None => {
+            // Category missing - create and update config
             let id = state.discord.create_github_category(gid).await?;
             server_config::save_config(
                 &state.db,

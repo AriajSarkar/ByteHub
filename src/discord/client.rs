@@ -182,7 +182,7 @@ impl DiscordInterface for DiscordClient {
             .http
             .create_guild_channel(guild_id, "Mod")
             .kind(ChannelType::GuildCategory)
-            .permission_overwrites(&[everyone_deny.clone()])
+            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
@@ -195,7 +195,7 @@ impl DiscordInterface for DiscordClient {
             .create_guild_channel(guild_id, "project-review")
             .kind(ChannelType::GuildText)
             .parent_id(category.id)
-            .permission_overwrites(&[everyone_deny.clone()])
+            .permission_overwrites(&[everyone_deny])
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()

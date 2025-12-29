@@ -9,6 +9,8 @@ pub enum Error {
     InvalidSignature,
     #[error("invalid payload: {0}")]
     InvalidPayload(String),
+    #[error("project already exists: {0}")]
+    ProjectAlreadyExists(String),
     #[error("not found: {0}")]
     NotFound(String),
     #[error("unauthorized")]
@@ -24,6 +26,7 @@ impl IntoResponse for Error {
         let status = match &self {
             Error::InvalidSignature | Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::InvalidPayload(_) => StatusCode::BAD_REQUEST,
+            Error::ProjectAlreadyExists(_) => StatusCode::CONFLICT,
             Error::NotFound(_) => StatusCode::NOT_FOUND,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };

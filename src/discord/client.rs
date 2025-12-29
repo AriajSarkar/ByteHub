@@ -124,12 +124,17 @@ impl DiscordInterface for DiscordClient {
         // @everyone role ID is the same as guild ID
         let everyone_role_id: Id<RoleMarker> = Id::new(guild_id.get());
 
-        // Deny SEND_MESSAGES for @everyone (read-only announcements)
+        // Deny SEND_MESSAGES and thread permissions for @everyone (fully read-only)
+        let deny_perms = Permissions::SEND_MESSAGES
+            | Permissions::SEND_MESSAGES_IN_THREADS
+            | Permissions::CREATE_PUBLIC_THREADS
+            | Permissions::CREATE_PRIVATE_THREADS;
+
         let overwrites = vec![PermissionOverwrite {
             id: everyone_role_id.cast(),
             kind: PermissionOverwriteType::Role,
             allow: Permissions::VIEW_CHANNEL,
-            deny: Permissions::SEND_MESSAGES,
+            deny: deny_perms,
         }];
 
         let channel = self

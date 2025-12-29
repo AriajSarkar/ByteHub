@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Simple per-guild rate limiter using a sliding window approach
+/// Simple per-guild rate limiter using a fixed window approach
 pub struct RateLimiter {
     /// Guild ID -> (window_start, request_count)
     state: Mutex<HashMap<String, (Instant, u32)>>,

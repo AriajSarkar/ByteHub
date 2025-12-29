@@ -1,0 +1,69 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, dev]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.ref_name == 'main' && 'Production' || 'Development' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Deploy Convex (Dev)
+        if: github.ref_name == 'dev'
+        run: npx convex deploy
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+
+      - name: Deploy Convex (Prod)
+        if: github.ref_name == 'main'
+        run: npx convex deploy
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_PROD }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build register_commands
+        run: cargo build --release --bin register_commands
+
+      - name: Register Discord Commands (Dev)
+        if: github.ref_name == 'dev'
+        run: ./target/release/register_commands
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN_DEV }}
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID_DEV }}
+
+      - name: Register Discord Commands (Prod)
+        if: github.ref_name == 'main'
+        run: ./target/release/register_commands
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN_PROD }}
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID_PROD }}

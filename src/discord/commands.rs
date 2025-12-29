@@ -580,7 +580,13 @@ pub async fn do_repair(state: &AppState, guild_id: &Option<String>) -> Result<St
     }
 
     // Check project forums
-    let github_cat = new_github_forum_id.parse::<u64>().ok().map(Id::new);
+    let github_cat = match new_github_forum_id.parse::<u64>() {
+        Ok(id) => Some(Id::new(id)),
+        Err(_) => {
+            warn!("Failed to parse github_forum_id, skipping project forum repairs");
+            None
+        }
+    };
     let project_list = projects::list_projects_by_guild(&state.db, guild_id_str).await?;
 
     for project in project_list.iter().filter(|p| p.is_approved) {

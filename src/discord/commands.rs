@@ -215,10 +215,10 @@ async fn handle_submit_project(db: &ConvexDb, data: &InteractionData) -> Result<
         .and_then(|o| o.value.as_str())
         .ok_or(Error::InvalidPayload("missing repo".into()))?;
 
-    // Handle the case where project already exists
+    // Handle the case where project already exists (type-safe matching)
     match projects::submit_project(db, repo).await {
         Ok(_) => Ok(format!("Project `{}` submitted for approval.", repo)),
-        Err(Error::InvalidPayload(msg)) if msg.contains("already exists") => {
+        Err(Error::ProjectAlreadyExists(_)) => {
             Ok(format!("⚠️ Project `{}` has already been submitted.", repo))
         }
         Err(e) => Err(e),

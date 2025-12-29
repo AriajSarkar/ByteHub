@@ -163,6 +163,11 @@ impl DiscordInterface for DiscordClient {
 
     /// Create a forum channel for a project inside a category
     /// Forum is read-only for @everyone (view but can't post/reply)
+    ///
+    /// # Bot Permissions
+    /// The bot's guild role must have `MANAGE_THREADS` (or `MANAGE_CHANNELS`) permission
+    /// to successfully lock and pin threads after creation. These permissions are not
+    /// set via channel overwrites—they must be configured on the bot's guild role.
     async fn create_project_forum(
         &self,
         guild_id: Id<GuildMarker>,

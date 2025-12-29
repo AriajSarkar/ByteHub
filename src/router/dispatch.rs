@@ -208,7 +208,10 @@ impl Dispatcher {
             .await?;
 
         // Pin and lock the Activity thread (Discord allows only 1 pinned thread per forum)
-        let _ = self.discord.pin_and_lock_thread(tid).await;
+        // Note: Requires bot to have MANAGE_THREADS permission in the guild
+        if let Err(e) = self.discord.pin_and_lock_thread(tid).await {
+            info!(thread_id = %tid, error = %e, "failed to pin and lock activity thread (bot may lack MANAGE_THREADS permission)");
+        }
 
         let tid_str = tid.get().to_string();
         projects::update_thread_id(&self.db, repo, &tid_str).await?;
@@ -445,7 +448,10 @@ impl Dispatcher {
                 .await?;
 
             // Lock the sidebar thread (but don't pin - Discord allows only 1 pinned thread per forum)
-            let _ = self.discord.lock_thread(tid).await;
+            // Note: Requires bot to have MANAGE_THREADS permission in the guild
+            if let Err(e) = self.discord.lock_thread(tid).await {
+                info!(thread_id = %tid, error = %e, "failed to lock sidebar thread (bot may lack MANAGE_THREADS permission)");
+            }
         }
 
         Ok(())

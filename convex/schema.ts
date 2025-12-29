@@ -37,8 +37,5 @@ export default defineSchema({
         guild_id: v.string(),
         announcements_id: v.string(),
         github_forum_id: v.string(),
-        mod_category_id: v.optional(v.string()),
-        project_review_id: v.optional(v.string()),
-        approvals_id: v.optional(v.string()),
     }).index("by_guild", ["guild_id"]),
 });

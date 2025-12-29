@@ -482,9 +482,6 @@ impl Dispatcher {
                         &project.guild_id,
                         &id.get().to_string(),
                         &config.github_forum_id,
-                        config.mod_category_id.as_deref(),
-                        config.project_review_id.as_deref(),
-                        config.approvals_id.as_deref(),
                     )
                     .await?;
                 }
@@ -497,9 +494,6 @@ impl Dispatcher {
                     &project.guild_id,
                     &id.get().to_string(),
                     &config.github_forum_id,
-                    config.mod_category_id.as_deref(),
-                    config.project_review_id.as_deref(),
-                    config.approvals_id.as_deref(),
                 )
                 .await?;
                 id

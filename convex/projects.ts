@@ -174,10 +174,14 @@ export const get = query({
     },
 });
 
-// List all projects
-export const list = query({
-    handler: async (ctx) => {
-        return await ctx.db.query("projects").collect();
+// List projects by guild
+export const listByGuild = query({
+    args: { guild_id: v.string() },
+    handler: async (ctx, args) => {
+        return await ctx.db
+            .query("projects")
+            .withIndex("by_guild", (q) => q.eq("guild_id", args.guild_id))
+            .collect();
     },
 });
 

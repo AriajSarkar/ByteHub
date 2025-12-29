@@ -154,8 +154,15 @@ pub async fn get_project(db: &ConvexDb, github_repo: &str) -> Result<Option<Proj
     Ok(Some(project))
 }
 
-pub async fn list_projects(db: &ConvexDb) -> Result<Vec<Project>> {
-    let result = db.query("projects:list", btreemap! {}).await?;
+pub async fn list_projects_by_guild(db: &ConvexDb, guild_id: &str) -> Result<Vec<Project>> {
+    let result = db
+        .query(
+            "projects:listByGuild",
+            btreemap! {
+                "guild_id".into() => ConvexValue::String(guild_id.to_string()),
+            },
+        )
+        .await?;
 
     let projects: Vec<Project> = serde_json::from_value(result)
         .map_err(|e| Error::InvalidPayload(format!("Failed to parse projects: {}", e)))?;

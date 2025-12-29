@@ -24,18 +24,20 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN pnpm install
 
-# Build args for Convex and Discord (passed at build time)
-ARG CONVEX_DEPLOY_KEY
-ARG DISCORD_BOT_TOKEN
-ARG DISCORD_APPLICATION_ID
-
-# Deploy Convex functions (uses deploy key for headless CI/CD)
-RUN CONVEX_DEPLOY_KEY=$CONVEX_DEPLOY_KEY npx convex deploy
-
-# Register Discord commands (build the binary first, then run it)
+# Build the register_commands binary first
 RUN cargo build --release --bin register_commands
-RUN DISCORD_BOT_TOKEN=$DISCORD_BOT_TOKEN \
-    DISCORD_APPLICATION_ID=$DISCORD_APPLICATION_ID \
+
+# Deploy Convex functions using BuildKit secrets (never stored in image layers)
+# Build with: --secret id=convex_key,env=CONVEX_DEPLOY_KEY
+RUN --mount=type=secret,id=convex_key \
+    CONVEX_DEPLOY_KEY=$(cat /run/secrets/convex_key) npx convex deploy
+
+# Register Discord commands using BuildKit secrets
+# Build with: --secret id=discord_token,env=DISCORD_BOT_TOKEN --secret id=discord_app_id,env=DISCORD_APPLICATION_ID
+RUN --mount=type=secret,id=discord_token \
+    --mount=type=secret,id=discord_app_id \
+    DISCORD_BOT_TOKEN=$(cat /run/secrets/discord_token) \
+    DISCORD_APPLICATION_ID=$(cat /run/secrets/discord_app_id) \
     ./target/release/register_commands
 
 # Build the main application

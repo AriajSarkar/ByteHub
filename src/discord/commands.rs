@@ -15,7 +15,7 @@ use twilight_model::id::Id;
 
 const REQUIRED_PERMISSIONS: Permissions = Permissions::from_bits_retain(326417599504);
 
-/// Rate limiter for expensive commands (setup-server, approve)
+/// Rate limiter for expensive commands (setup-server, approve, repair)
 /// 5 requests per 60 seconds per guild to prevent spam and database conflicts
 fn get_rate_limiter() -> &'static RateLimiter {
     static RATE_LIMITER: OnceLock<RateLimiter> = OnceLock::new();
@@ -277,8 +277,16 @@ pub async fn do_approve(
     // Note: save_config is idempotent, but we still avoid redundant calls for efficiency
     let github_category = match state.discord.find_channel_by_name(gid, "GitHub").await? {
         Some(id) => {
-            // Category exists - use it directly
-            // Config sync will happen via setup-server if needed
+            // Category exists - sync config if ID changed
+            if id.get().to_string() != config.github_forum_id {
+                server_config::save_config(
+                    &state.db,
+                    guild_id_str,
+                    &config.announcements_id,
+                    &id.get().to_string(),
+                )
+                .await?;
+            }
             id
         }
         None => {

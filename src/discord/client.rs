@@ -110,15 +110,33 @@ impl DiscordClient {
 
 #[async_trait]
 impl DiscordInterface for DiscordClient {
-    /// Create announcements channel (text channel)
+    /// Create announcements channel (read-only for @everyone)
     async fn create_announcements_channel(
         &self,
         guild_id: Id<GuildMarker>,
     ) -> Result<Id<ChannelMarker>> {
+        use twilight_model::channel::permission_overwrite::{
+            PermissionOverwrite, PermissionOverwriteType,
+        };
+        use twilight_model::guild::Permissions;
+        use twilight_model::id::marker::RoleMarker;
+
+        // @everyone role ID is the same as guild ID
+        let everyone_role_id: Id<RoleMarker> = Id::new(guild_id.get());
+
+        // Deny SEND_MESSAGES for @everyone (read-only announcements)
+        let overwrites = vec![PermissionOverwrite {
+            id: everyone_role_id.cast(),
+            kind: PermissionOverwriteType::Role,
+            allow: Permissions::VIEW_CHANNEL,
+            deny: Permissions::SEND_MESSAGES,
+        }];
+
         let channel = self
             .http
             .create_guild_channel(guild_id, "announcements")
             .kind(ChannelType::GuildAnnouncement)
+            .permission_overwrites(&overwrites)
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
@@ -144,17 +162,38 @@ impl DiscordInterface for DiscordClient {
     }
 
     /// Create a forum channel for a project inside a category
+    /// Forum is read-only for @everyone (view but can't post/reply)
     async fn create_project_forum(
         &self,
         guild_id: Id<GuildMarker>,
         category_id: Id<ChannelMarker>,
         project_name: &str,
     ) -> Result<Id<ChannelMarker>> {
+        use twilight_model::channel::permission_overwrite::{
+            PermissionOverwrite, PermissionOverwriteType,
+        };
+        use twilight_model::guild::Permissions;
+        use twilight_model::id::marker::RoleMarker;
+
+        // @everyone role ID is the same as guild ID
+        let everyone_role_id: Id<RoleMarker> = Id::new(guild_id.get());
+
+        // Deny: SEND_MESSAGES_IN_THREADS (can't reply) + CREATE_PUBLIC_THREADS (can't create posts)
+        let deny_perms = Permissions::SEND_MESSAGES_IN_THREADS | Permissions::CREATE_PUBLIC_THREADS;
+
+        let overwrites = vec![PermissionOverwrite {
+            id: everyone_role_id.cast(),
+            kind: PermissionOverwriteType::Role,
+            allow: Permissions::VIEW_CHANNEL,
+            deny: deny_perms,
+        }];
+
         let channel = self
             .http
             .create_guild_channel(guild_id, project_name)
             .kind(ChannelType::GuildForum)
             .parent_id(category_id)
+            .permission_overwrites(&overwrites)
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()

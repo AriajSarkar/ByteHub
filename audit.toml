@@ -6,6 +6,4 @@
 # Cannot update directly - waiting for upstream fix
 
 [advisories]
-ignore = [
-    "RUSTSEC-2023-0071",  # rsa: Marvin Attack timing side-channel (CVE-2023-49092)
-]
+ignore = []

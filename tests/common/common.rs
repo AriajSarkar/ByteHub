@@ -73,12 +73,7 @@ impl DiscordInterface for MockDiscord {
     ) -> Result<Id<ChannelMarker>> {
         Ok(Id::new(300))
     }
-    async fn create_mod_category(
-        &self,
-        _guild_id: Id<GuildMarker>,
-    ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)> {
-        Ok((Id::new(400), Id::new(401), Id::new(402)))
-    }
+
     async fn find_channel_by_name(
         &self,
         _guild_id: Id<GuildMarker>,

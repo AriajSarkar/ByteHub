@@ -117,7 +117,7 @@ pub async fn handle_interaction(
         let member = interaction.member.as_ref();
 
         // Commands that need deferred response (channel creation takes >3s)
-        if data.name == "setup-server" || data.name == "approve" {
+        if data.name == "setup-server" || data.name == "approve" || data.name == "repair" {
             // Defense-in-depth: Early-exit for DM invocations
             // (Commands should already be guild-only via dm_permission: false)
             if interaction.guild_id.is_none() {
@@ -158,6 +158,7 @@ pub async fn handle_interaction(
                 let result = match cmd_name.as_str() {
                     "setup-server" => do_setup_server(&state_clone, &guild_id).await,
                     "approve" => do_approve(&state_clone, &data_clone, &guild_id).await,
+                    "repair" => do_repair(&state_clone, &guild_id).await,
                     _ => Ok("Unknown".to_string()),
                 };
 
@@ -184,7 +185,7 @@ pub async fn handle_interaction(
             "submit-project" => handle_submit_project(&state.db, data).await?,
             "deny" => handle_deny(&state.db, member, data).await?,
             "whitelist-user" => handle_whitelist(&state.db, member, data).await?,
-            "list" => handle_list(&state.db, member).await?,
+            "list" => handle_list(&state.db, member, &interaction.guild_id).await?,
             _ => "Unknown command".to_string(),
         };
 
@@ -288,9 +289,6 @@ pub async fn do_approve(
                 guild_id_str,
                 &config.announcements_id,
                 &id.get().to_string(),
-                config.mod_category_id.as_deref(),
-                config.project_review_id.as_deref(),
-                config.approvals_id.as_deref(),
             )
             .await?;
             id
@@ -423,13 +421,21 @@ fn check_moderator(member: Option<&Member>) -> Result<()> {
     Err(Error::Unauthorized)
 }
 
-async fn handle_list(db: &ConvexDb, member: Option<&Member>) -> Result<String> {
+async fn handle_list(
+    db: &ConvexDb,
+    member: Option<&Member>,
+    guild_id: &Option<String>,
+) -> Result<String> {
     check_moderator(member)?;
 
-    let projects_list = projects::list_projects(db).await?;
+    let guild_id_str = guild_id
+        .as_ref()
+        .ok_or(Error::InvalidPayload("missing guild_id".into()))?;
+
+    let projects_list = projects::list_projects_by_guild(db, guild_id_str).await?;
 
     if projects_list.is_empty() {
-        return Ok("No projects registered.".to_string());
+        return Ok("No projects registered in this server.".to_string());
     }
 
     let mut approved = Vec::new();
@@ -490,7 +496,7 @@ pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Res
         )));
     }
 
-    // Always find or create channels (handles deleted/stale channels)
+    // Find or create announcements channel (checks if already exists)
     let announcements_id = match state
         .discord
         .find_channel_containing(gid, "announcements")
@@ -506,53 +512,112 @@ pub async fn do_setup_server(state: &AppState, guild_id: &Option<String>) -> Res
         None => state.discord.create_github_category(gid).await?,
     };
 
-    // Find or create Mod category with channels
-    // Use find_category_containing to match only categories (not text channels)
-    let (mod_cat_id, review_id, approvals_id) =
-        match state.discord.find_category_containing(gid, "mod").await? {
-            Some(cat_id) => {
-                // Category exists, find or create sub-channels
-                let review = match state
-                    .discord
-                    .find_channel_by_name(gid, "project-review")
-                    .await?
-                {
-                    Some(id) => id,
-                    None => {
-                        state
-                            .discord
-                            .create_channel_in_category(gid, cat_id, "project-review")
-                            .await?
-                    }
-                };
-                let approvals = match state.discord.find_channel_by_name(gid, "approvals").await? {
-                    Some(id) => id,
-                    None => {
-                        state
-                            .discord
-                            .create_channel_in_category(gid, cat_id, "approvals")
-                            .await?
-                    }
-                };
-                (cat_id, review, approvals)
-            }
-            None => state.discord.create_mod_category(gid).await?,
-        };
-
     // Save config to database
     server_config::save_config(
         &state.db,
         guild_id_str,
         &announcements_id.get().to_string(),
         &github_category_id.get().to_string(),
-        Some(&mod_cat_id.get().to_string()),
-        Some(&review_id.get().to_string()),
-        Some(&approvals_id.get().to_string()),
     )
     .await?;
 
     Ok(format!(
-        "✅ **Server setup complete!**\n\n**Created channels:**\n• <#{}> - Announcements\n• <#{}> - GitHub (Category)\n• <#{}> - Mod (project-review)\n• <#{}> - Mod (approvals)",
-        announcements_id, github_category_id, review_id, approvals_id
+        "✅ **Server setup complete!**\n\n**Channels:**\n• <#{}> - Announcements\n• <#{}> - GitHub (Category)",
+        announcements_id, github_category_id
     ))
+}
+
+/// Repair command - sync DB with Discord state
+/// Recreates missing channels and updates DB with new IDs
+pub async fn do_repair(state: &AppState, guild_id: &Option<String>) -> Result<String> {
+    let guild_id_str = guild_id
+        .as_ref()
+        .ok_or(Error::InvalidPayload("missing guild_id".into()))?;
+
+    let guild_id_u64: u64 = guild_id_str
+        .parse()
+        .map_err(|_| Error::InvalidPayload("invalid guild_id".into()))?;
+
+    let gid = Id::new(guild_id_u64);
+
+    // Get current Discord channels
+    let channels = state.discord.guild_channels(gid).await?;
+
+    // Get server config from DB
+    let config = server_config::get_config(&state.db, guild_id_str)
+        .await?
+        .ok_or(Error::InvalidPayload(
+            "Server not set up. Run /setup-server first.".into(),
+        ))?;
+
+    let mut repairs = Vec::new();
+    let mut new_announcements_id = config.announcements_id.clone();
+    let mut new_github_forum_id = config.github_forum_id.clone();
+
+    // Check announcements channel
+    if !channel_exists(&channels, &config.announcements_id) {
+        let new_id = state.discord.create_announcements_channel(gid).await?;
+        new_announcements_id = new_id.get().to_string();
+        repairs.push(format!("✅ Recreated <#{}> (Announcements)", new_id));
+    }
+
+    // Check GitHub category
+    if !channel_exists(&channels, &config.github_forum_id) {
+        let new_id = state.discord.create_github_category(gid).await?;
+        new_github_forum_id = new_id.get().to_string();
+        repairs.push("✅ Recreated GitHub category".to_string());
+    }
+
+    // Update config if any server channels were repaired
+    if !repairs.is_empty() {
+        server_config::save_config(
+            &state.db,
+            guild_id_str,
+            &new_announcements_id,
+            &new_github_forum_id,
+        )
+        .await?;
+    }
+
+    // Check project forums
+    let github_cat = new_github_forum_id.parse::<u64>().ok().map(Id::new);
+    let project_list = projects::list_projects_by_guild(&state.db, guild_id_str).await?;
+
+    for project in project_list.iter().filter(|p| p.is_approved) {
+        if !channel_exists(&channels, &project.forum_channel_id) {
+            if let Some(cat_id) = github_cat {
+                let name = project
+                    .github_repo
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&project.github_repo);
+                let new_id = state
+                    .discord
+                    .create_project_forum(gid, cat_id, name)
+                    .await?;
+                projects::update_forum_id(
+                    &state.db,
+                    &project.github_repo,
+                    &new_id.get().to_string(),
+                )
+                .await?;
+                repairs.push(format!("✅ Recreated forum for `{}`", project.github_repo));
+            }
+        }
+    }
+
+    if repairs.is_empty() {
+        Ok("✅ All channels are in sync. Nothing to repair.".into())
+    } else {
+        Ok(format!("**Repairs completed:**\n{}", repairs.join("\n")))
+    }
+}
+
+/// Helper to check if a channel ID exists in the guild
+fn channel_exists(channels: &[twilight_model::channel::Channel], id_str: &str) -> bool {
+    id_str
+        .parse::<u64>()
+        .ok()
+        .map(|id| channels.iter().any(|c| c.id.get() == id))
+        .unwrap_or(false)
 }

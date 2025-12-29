@@ -77,6 +77,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "description": "Set up ByteHub channels in this server (mod only)",
             "dm_permission": false,
             "contexts": [0]
+        },
+        {
+            "name": "repair",
+            "description": "Sync database with Discord - recreate deleted channels (mod only)",
+            "dm_permission": false,
+            "contexts": [0]
         }
     ]);
 

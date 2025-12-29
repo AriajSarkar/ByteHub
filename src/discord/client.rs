@@ -22,10 +22,7 @@ pub trait DiscordInterface: Send + Sync {
         category_id: Id<ChannelMarker>,
         project_name: &str,
     ) -> Result<Id<ChannelMarker>>;
-    async fn create_mod_category(
-        &self,
-        guild_id: Id<GuildMarker>,
-    ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)>;
+
     async fn find_channel_by_name(
         &self,
         guild_id: Id<GuildMarker>,
@@ -121,7 +118,7 @@ impl DiscordInterface for DiscordClient {
         let channel = self
             .http
             .create_guild_channel(guild_id, "announcements")
-            .kind(ChannelType::GuildText)
+            .kind(ChannelType::GuildAnnouncement)
             .await
             .map_err(|e| Error::Discord(e.to_string()))?
             .model()
@@ -165,49 +162,6 @@ impl DiscordInterface for DiscordClient {
             .map_err(|e| Error::Discord(e.to_string()))?;
 
         Ok(channel.id)
-    }
-
-    /// Create Mod category with channels (public, inherits server permissions)
-    async fn create_mod_category(
-        &self,
-        guild_id: Id<GuildMarker>,
-    ) -> Result<(Id<ChannelMarker>, Id<ChannelMarker>, Id<ChannelMarker>)> {
-        // Create category (no permission overwrites - inherits server defaults)
-        let category = self
-            .http
-            .create_guild_channel(guild_id, "Mod")
-            .kind(ChannelType::GuildCategory)
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?
-            .model()
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?;
-
-        // Create project-review channel in category
-        let review = self
-            .http
-            .create_guild_channel(guild_id, "project-review")
-            .kind(ChannelType::GuildText)
-            .parent_id(category.id)
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?
-            .model()
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?;
-
-        // Create approvals channel in category
-        let approvals = self
-            .http
-            .create_guild_channel(guild_id, "approvals")
-            .kind(ChannelType::GuildText)
-            .parent_id(category.id)
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?
-            .model()
-            .await
-            .map_err(|e| Error::Discord(e.to_string()))?;
-
-        Ok((category.id, review.id, approvals.id))
     }
 
     /// Find channel by name in guild (exact match)

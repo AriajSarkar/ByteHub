@@ -9,6 +9,9 @@ use crate::storage::convex::ConvexDb;
 pub struct ServerConfig {
     pub guild_id: String,
     pub announcements_id: String,
+    /// Note: Despite the name, this field stores the GitHub *category* ID,
+    /// not a forum ID. The category contains project-specific forum channels.
+    /// Named for historical reasons; renaming would require a database migration.
     pub github_forum_id: String,
 }
 

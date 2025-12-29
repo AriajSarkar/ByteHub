@@ -35,8 +35,8 @@ fn parse_mutation_result(result: &serde_json::Value) -> Result<Option<String>> {
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
-        // Return dedicated error variant for type-safe matching
-        if error.contains("already exists") {
+        // Return dedicated error variant for type-safe matching (case-insensitive)
+        if error.to_lowercase().contains("already exists") {
             Err(Error::ProjectAlreadyExists(error.to_string()))
         } else {
             Err(Error::InvalidPayload(error.to_string()))

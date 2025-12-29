@@ -1,9 +1,5 @@
 # Security audit configuration
-# https://rustsec.org/advisories/RUSTSEC-2023-0071
-# 
-# Ignoring RSA Marvin timing side-channel vulnerability (CVE-2023-49092)
-# Transitive dependency: octocrab -> jsonwebtoken -> rsa v0.9.9
-# Cannot update directly - waiting for upstream fix
+# Note: Advisory ignores are configured in .github/workflows/security.yml
 
 [advisories]
 ignore = []

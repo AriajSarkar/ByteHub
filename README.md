@@ -78,8 +78,17 @@ cargo run
 
 ### Run with Docker
 
+The Docker build uses BuildKit secrets to securely pass credentials without exposing them in image layers:
+
 ```bash
-docker build -t bytehub .
+# Build with secrets (requires DOCKER_BUILDKIT=1)
+DOCKER_BUILDKIT=1 docker build \
+  --secret id=convex_key,env=CONVEX_DEPLOY_KEY \
+  --secret id=discord_token,env=DISCORD_BOT_TOKEN \
+  --secret id=discord_app_id,env=DISCORD_APPLICATION_ID \
+  -t bytehub .
+
+# Run with runtime environment
 docker run -p 3000:3000 --env-file .env bytehub
 ```
 

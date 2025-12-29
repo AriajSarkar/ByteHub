@@ -600,7 +600,17 @@ pub async fn do_repair(state: &AppState, guild_id: &Option<String>) -> Result<St
     };
     let project_list = projects::list_projects_by_guild(&state.db, guild_id_str).await?;
 
+    const MAX_FORUM_REPAIRS: usize = 10; // Prevent excessive API calls
+
+    let mut forum_repair_count = 0;
     for project in project_list.iter().filter(|p| p.is_approved) {
+        if forum_repair_count >= MAX_FORUM_REPAIRS {
+            repairs.push(format!(
+                "⚠️ Stopped after {} forum repairs to avoid rate limits. Run /repair again.",
+                MAX_FORUM_REPAIRS
+            ));
+            break;
+        }
         if !channel_exists(&channels, &project.forum_channel_id) {
             if let Some(cat_id) = github_cat {
                 let name = project
@@ -619,6 +629,7 @@ pub async fn do_repair(state: &AppState, guild_id: &Option<String>) -> Result<St
                 )
                 .await?;
                 repairs.push(format!("✅ Recreated forum for `{}`", project.github_repo));
+                forum_repair_count += 1;
             }
         }
     }

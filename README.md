@@ -23,6 +23,20 @@ A powerful bridge that connects your GitHub repositories to Discord, providing r
 
 ---
 
+## 🦀 Powered By
+
+<a href="https://crates.io/crates/crabgraph">
+  <img src="https://img.shields.io/badge/🦀_CrabGraph-Cryptography-orange?style=for-the-badge" alt="CrabGraph">
+</a>
+
+ByteHub uses [**CrabGraph**](https://crates.io/crates/crabgraph) - a safe, ergonomic, high-performance cryptographic library for Rust built on audited primitives.
+
+```toml
+crabgraph = "0.3"
+```
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites

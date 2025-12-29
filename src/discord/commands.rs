@@ -131,19 +131,19 @@ pub async fn handle_interaction(
             }
 
             // Rate limiting: Prevent command spam that causes database conflicts
-            if let Some(ref gid) = interaction.guild_id {
-                if let Err(wait_secs) = get_rate_limiter().check(gid) {
-                    return Ok(Json(InteractionResponse {
-                        kind: 4,
-                        data: Some(ResponseData {
-                            content: format!(
-                                "⏳ Rate limited. Please wait {} seconds before running this command again.",
-                                wait_secs
-                            ),
-                            flags: Some(64),
-                        }),
-                    }));
-                }
+            // Safety: guild_id is guaranteed Some after the early-exit check above
+            let gid = interaction.guild_id.as_ref().unwrap();
+            if let Err(wait_secs) = get_rate_limiter().check(gid) {
+                return Ok(Json(InteractionResponse {
+                    kind: 4,
+                    data: Some(ResponseData {
+                        content: format!(
+                            "⏳ Rate limited. Please wait {} seconds before running this command again.",
+                            wait_secs
+                        ),
+                        flags: Some(64),
+                    }),
+                }));
             }
 
             check_moderator(member)?;
@@ -168,11 +168,14 @@ pub async fn handle_interaction(
                 };
 
                 let url = format!("https://discord.com/api/v10/webhooks/{}/{}", app_id, token);
-                let _ = reqwest::Client::new()
+                if let Err(e) = reqwest::Client::new()
                     .post(&url)
                     .json(&serde_json::json!({ "content": content, "flags": 64 }))
                     .send()
-                    .await;
+                    .await
+                {
+                    tracing::warn!("Failed to send follow-up message: {}", e);
+                }
             });
 
             return Ok(Json(InteractionResponse {

@@ -35,7 +35,7 @@ ARG DISCORD_APPLICATION_ID
 RUN if [ "$ENVIRONMENT" = "prod" ]; then \
     CONVEX_URL=$CONVEX_URL CONVEX_DEPLOYMENT=$CONVEX_DEPLOYMENT npx convex deploy -y; \
     else \
-    CONVEX_URL=$CONVEX_URL CONVEX_DEPLOYMENT=$CONVEX_DEPLOYMENT npx convex dev --once -y; \
+    CONVEX_URL=$CONVEX_URL CONVEX_DEPLOYMENT=$CONVEX_DEPLOYMENT npx convex dev --once; \
     fi
 
 # Register Discord commands (build the binary first, then run it)

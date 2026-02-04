@@ -61,7 +61,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     env:
-      # Convex dev deployment for CI testing
+      # Convex dev deployment for CI testing (not available for Dependabot PRs)
       CONVEX_URL: ${{ secrets.CONVEX_URL }}
       GITHUB_WEBHOOK_SECRET: test_secret
       DISCORD_PUBLIC_KEY: test_key
@@ -76,5 +76,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         
-      - name: Run tests
+      - name: Run unit tests
+        run: cargo test --lib
+        
+      - name: Run integration tests
+        if: env.CONVEX_URL != ''
         run: cargo test --tests

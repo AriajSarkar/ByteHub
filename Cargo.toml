@@ -19,14 +19,14 @@ twilight-http = "0.17"
 twilight-model = "0.17"
 twilight-util = "0.17"
 octocrab = "0.49"
-crabgraph = "0.3"
+crabgraph = { version = "0.4.0-pre", features = ["rustls-provider"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 thiserror = "2"
 dotenvy = "0.15"
 anyhow = "1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 [[test]]
 name = "github_pull_request"

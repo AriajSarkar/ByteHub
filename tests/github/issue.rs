@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 async fn create_test_dispatcher() -> Dispatcher {
     // Install crabgraph TLS provider for tests
-    crabgraph::tls::install_default();
+    let _ = crabgraph::tls::try_install_default();
 
     dotenvy::dotenv().ok();
     let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");

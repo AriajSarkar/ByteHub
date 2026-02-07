@@ -5,6 +5,7 @@ use bytehub::storage::convex::ConvexDb;
 use std::sync::Arc;
 
 async fn create_test_dispatcher() -> Dispatcher {
+    crabgraph::tls::install_default();
     dotenvy::dotenv().ok();
     let convex_url = std::env::var("CONVEX_URL").expect("CONVEX_URL required for tests");
     let db = ConvexDb::new(&convex_url)

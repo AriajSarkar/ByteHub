@@ -19,6 +19,7 @@ pub struct MockDiscord {
 
 /// Initialize environment variables from .env file
 fn init_env() {
+    crabgraph::tls::install_default();
     dotenvy::dotenv().ok();
 }
 

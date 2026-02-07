@@ -40,6 +40,9 @@ fn print_banner(addr: &SocketAddr) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install crabgraph as the TLS crypto provider (must be done early)
+    crabgraph::tls::install_default();
+
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
